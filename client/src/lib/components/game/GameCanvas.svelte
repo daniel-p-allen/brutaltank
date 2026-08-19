@@ -31,7 +31,14 @@
 		turnOrder: [],
 		currentTurnIndex: 0,
 		wind: null,
-		awaitingShotResolution: false
+		awaitingShotResolution: false,
+		activePlayerId: null,
+		turnTimeoutSec: null,
+		turnStartedAtMs: null,
+		fireRejectedReason: null,
+		disconnectedPlayerIds: [],
+		roundEndedInfo: null,
+		matchEndedInfo: null
 	};
 	let activeShot: PendingShotAnimation | null = null;
 

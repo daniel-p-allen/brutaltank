@@ -137,4 +137,165 @@ describe('matchStore', () => {
 		});
 		expect(state.terrain.heights).toEqual(samplePayload.terrain.heights);
 	});
+
+	it('sets activePlayerId from turnOrder/currentTurnIndex on MatchStateSync', () => {
+		const state = applyMatchStateSync(samplePayload);
+		expect(state.activePlayerId).toBe('p-1');
+	});
+
+	it('flips status to IN_PROGRESS on MatchStarted', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'MatchStarted',
+				v: 1,
+				payload: { matchConfig: { maxRounds: 4, maxPlayers: 8 }, players: [] }
+			})
+		);
+		expect(get(matchStore).status).toBe('IN_PROGRESS');
+	});
+
+	it('records active player/wind/timeout on TurnStarted', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		const before = Date.now();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'TurnStarted',
+				v: 1,
+				payload: { playerId: 'p-2', wind: { strength: -8, directionSign: -1 }, turnTimeoutSec: 30 }
+			})
+		);
+
+		const state = get(matchStore);
+		expect(state.activePlayerId).toBe('p-2');
+		expect(state.wind).toEqual({ strength: -8, directionSign: -1 });
+		expect(state.turnTimeoutSec).toBe(30);
+		expect(state.turnStartedAtMs).not.toBeNull();
+		expect(state.turnStartedAtMs!).toBeGreaterThanOrEqual(before);
+		expect(state.fireRejectedReason).toBeNull();
+	});
+
+	it('records the reason on FireRejected', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'FireRejected',
+				v: 1,
+				requestId: 'r10',
+				payload: { reason: 'NOT_YOUR_TURN' }
+			})
+		);
+		expect(get(matchStore).fireRejectedReason).toBe('NOT_YOUR_TURN');
+	});
+
+	it('a later TurnStarted clears a stale FireRejected reason', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'FireRejected',
+				v: 1,
+				payload: { reason: 'NOT_YOUR_TURN' }
+			})
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'TurnStarted',
+				v: 1,
+				payload: { playerId: 'p-1', wind: { strength: 1, directionSign: 1 }, turnTimeoutSec: 30 }
+			})
+		);
+		expect(get(matchStore).fireRejectedReason).toBeNull();
+	});
+
+	it('records standings on RoundEnded', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'RoundEnded',
+				v: 1,
+				payload: {
+					winnerPlayerId: 'p-2',
+					standings: [
+						{ playerId: 'p-2', cash: 780 },
+						{ playerId: 'p-1', cash: 540 }
+					]
+				}
+			})
+		);
+		const state = get(matchStore);
+		expect(state.roundEndedInfo?.winnerPlayerId).toBe('p-2');
+		expect(state.roundEndedInfo?.standings).toHaveLength(2);
+	});
+
+	it('a fresh MatchStateSync clears a stale RoundEnded banner', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'RoundEnded',
+				v: 1,
+				payload: { winnerPlayerId: 'p-2', standings: [] }
+			})
+		);
+		expect(get(matchStore).roundEndedInfo).not.toBeNull();
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		expect(get(matchStore).roundEndedInfo).toBeNull();
+	});
+
+	it('records final standings and flips status to COMPLETE on MatchEnded', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'MatchEnded',
+				v: 1,
+				payload: {
+					finalStandings: [{ playerId: 'p-2', cash: 1240, damageDealt: 860, kills: 3 }]
+				}
+			})
+		);
+		const state = get(matchStore);
+		expect(state.status).toBe('COMPLETE');
+		expect(state.matchEndedInfo?.finalStandings).toHaveLength(1);
+	});
+
+	it('tracks disconnected players and clears them on reconnect', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerDisconnected', v: 1, payload: { playerId: 'p-2' } })
+		);
+		expect(get(matchStore).disconnectedPlayerIds).toEqual(['p-2']);
+
+		// Duplicate disconnect notices shouldn't add a second entry.
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerDisconnected', v: 1, payload: { playerId: 'p-2' } })
+		);
+		expect(get(matchStore).disconnectedPlayerIds).toEqual(['p-2']);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerReconnected', v: 1, payload: { playerId: 'p-2' } })
+		);
+		expect(get(matchStore).disconnectedPlayerIds).toEqual([]);
+	});
 });

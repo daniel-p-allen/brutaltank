@@ -26,12 +26,23 @@ public final class TerrainGenerator {
     private TerrainGenerator() {
     }
 
-    /** Generates a fresh, deterministic terrain for the given seed. */
+    /** Generates a fresh, deterministic terrain for the given seed (M1's fixed 2-tank layout). */
     public static Terrain generate(long seed) {
-        return generate(seed, WORLD_WIDTH);
+        return generate(seed, WORLD_WIDTH, new int[] {SPAWN_X_1, SPAWN_X_2});
     }
 
     public static Terrain generate(long seed, int width) {
+        return generate(seed, width, new int[] {SPAWN_X_1, SPAWN_X_2});
+    }
+
+    /**
+     * Generates a fresh, deterministic terrain for the given seed with an
+     * arbitrary set of spawn x-positions (M2: up to 8 players). Each spawn
+     * gets the same ±{@link #SPAWN_PAD}-column flattening treatment as the
+     * original 2-tank layout; the underlying midpoint-displacement algorithm
+     * is unchanged.
+     */
+    public static Terrain generate(long seed, int width, int[] spawnXs) {
         SplittableRandom rng = new SplittableRandom(seed);
 
         int size = 1;
@@ -60,9 +71,34 @@ public final class TerrainGenerator {
         smooth(heights);
 
         Terrain terrain = new Terrain(heights);
-        flattenSpawn(terrain, SPAWN_X_1);
-        flattenSpawn(terrain, SPAWN_X_2);
+        for (int spawnX : spawnXs) {
+            flattenSpawn(terrain, spawnX);
+        }
         return terrain;
+    }
+
+    /**
+     * Evenly distributes {@code count} spawn x-positions across the world
+     * width with margin at both edges, per PLAN.md 4.1 ("spawn positions
+     * evenly distributed with jitter and minimum spacing" — M2 keeps this
+     * deterministic/simple: even spacing, no jitter, since minimum spacing
+     * is trivially satisfied by even distribution for up to 8 players).
+     */
+    public static int[] computeSpawnXs(int count) {
+        if (count <= 0) {
+            return new int[0];
+        }
+        int margin = 150;
+        int usable = WORLD_WIDTH - margin * 2;
+        int[] spawnXs = new int[count];
+        if (count == 1) {
+            spawnXs[0] = WORLD_WIDTH / 2;
+            return spawnXs;
+        }
+        for (int i = 0; i < count; i++) {
+            spawnXs[i] = margin + (int) Math.round(usable * (i / (double) (count - 1)));
+        }
+        return spawnXs;
     }
 
     private static void midpointDisplace(double[] work, int lo, int hi, double displacement, SplittableRandom rng) {

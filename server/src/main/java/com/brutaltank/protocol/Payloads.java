@@ -232,4 +232,281 @@ public final class Payloads {
         public ShotResolved() {
         }
     }
+
+    // ---------------------------------------------------------------
+    // M2: lobby messages (shared/protocol.md section 3)
+    // ---------------------------------------------------------------
+
+    /** Optional overrides carried on {@code CreateMatch.matchConfig}; null fields fall back to server defaults. */
+    public static final class MatchConfigDto {
+        public Integer maxRounds;
+        public Integer maxPlayers;
+
+        public MatchConfigDto() {
+        }
+
+        public MatchConfigDto(Integer maxRounds, Integer maxPlayers) {
+            this.maxRounds = maxRounds;
+            this.maxPlayers = maxPlayers;
+        }
+    }
+
+    /** Client -> Server: {@code CreateMatch{displayName, matchConfig?}}. */
+    public static final class CreateMatch {
+        public String displayName;
+        public MatchConfigDto matchConfig;
+
+        public CreateMatch() {
+        }
+    }
+
+    /** Client -> Server: {@code JoinMatch{matchId, displayName}}. */
+    public static final class JoinMatch {
+        public String matchId;
+        public String displayName;
+
+        public JoinMatch() {
+        }
+    }
+
+    /** Client -> Server: {@code SetReady{ready}}. */
+    public static final class SetReady {
+        public boolean ready;
+
+        public SetReady() {
+        }
+    }
+
+    /** Client -> Server: {@code Rejoin{matchId, playerToken}}. */
+    public static final class Rejoin {
+        public String matchId;
+        public String playerToken;
+
+        public Rejoin() {
+        }
+    }
+
+    /** Client -> Server: {@code LeaveMatch{}} (empty payload). */
+    public static final class LeaveMatch {
+    }
+
+    /** Server -> Client: {@code MatchCreated}, sent only to the creator. */
+    public static final class MatchCreated {
+        public String matchId;
+        public String joinCode;
+        public String playerToken;
+        public String playerId;
+
+        public MatchCreated() {
+        }
+
+        public MatchCreated(String matchId, String joinCode, String playerToken, String playerId) {
+            this.matchId = matchId;
+            this.joinCode = joinCode;
+            this.playerToken = playerToken;
+            this.playerId = playerId;
+        }
+    }
+
+    /** Server -> Client: {@code MatchJoined}, sent only to the joiner. */
+    public static final class MatchJoined {
+        public String matchId;
+        public String playerToken;
+        public String playerId;
+
+        public MatchJoined() {
+        }
+
+        public MatchJoined(String matchId, String playerToken, String playerId) {
+            this.matchId = matchId;
+            this.playerToken = playerToken;
+            this.playerId = playerId;
+        }
+    }
+
+    /** One roster entry inside {@link LobbyUpdate}. */
+    public static final class LobbyPlayerDto {
+        public String playerId;
+        public String displayName;
+        public boolean ready;
+        public boolean isHost;
+
+        public LobbyPlayerDto() {
+        }
+
+        public LobbyPlayerDto(String playerId, String displayName, boolean ready, boolean isHost) {
+            this.playerId = playerId;
+            this.displayName = displayName;
+            this.ready = ready;
+            this.isHost = isHost;
+        }
+    }
+
+    /** Server -> Client: {@code LobbyUpdate}, broadcast on roster/readiness changes. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static final class LobbyUpdate {
+        public String matchId;
+        public List<LobbyPlayerDto> players;
+        public String hostId;
+
+        public LobbyUpdate() {
+        }
+
+        public LobbyUpdate(String matchId, List<LobbyPlayerDto> players, String hostId) {
+            this.matchId = matchId;
+            this.players = players;
+            this.hostId = hostId;
+        }
+    }
+
+    /** One roster entry inside {@link MatchStarted}. */
+    public static final class StartedPlayerDto {
+        public String playerId;
+        public String displayName;
+        public String color;
+        public int cash;
+
+        public StartedPlayerDto() {
+        }
+
+        public StartedPlayerDto(String playerId, String displayName, String color, int cash) {
+            this.playerId = playerId;
+            this.displayName = displayName;
+            this.color = color;
+            this.cash = cash;
+        }
+    }
+
+    /** Resolved match config (both fields always populated) inside {@link MatchStarted}. */
+    public static final class ResolvedMatchConfigDto {
+        public int maxRounds;
+        public int maxPlayers;
+
+        public ResolvedMatchConfigDto() {
+        }
+
+        public ResolvedMatchConfigDto(int maxRounds, int maxPlayers) {
+            this.maxRounds = maxRounds;
+            this.maxPlayers = maxPlayers;
+        }
+    }
+
+    /** Server -> Client: {@code MatchStarted}, broadcast once on WAITING -> IN_PROGRESS. */
+    public static final class MatchStarted {
+        public ResolvedMatchConfigDto matchConfig;
+        public List<StartedPlayerDto> players;
+
+        public MatchStarted() {
+        }
+
+        public MatchStarted(ResolvedMatchConfigDto matchConfig, List<StartedPlayerDto> players) {
+            this.matchConfig = matchConfig;
+            this.players = players;
+        }
+    }
+
+    /** Server -> Client: {@code PlayerDisconnected{playerId}} / {@code PlayerReconnected{playerId}}. */
+    public static final class PlayerIdPayload {
+        public String playerId;
+
+        public PlayerIdPayload() {
+        }
+
+        public PlayerIdPayload(String playerId) {
+            this.playerId = playerId;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // M2: match/turn messages (shared/protocol.md section 4)
+    // ---------------------------------------------------------------
+
+    /** Server -> Client: {@code TurnStarted}. */
+    public static final class TurnStarted {
+        public String playerId;
+        public WindDto wind;
+        public int turnTimeoutSec;
+
+        public TurnStarted() {
+        }
+
+        public TurnStarted(String playerId, WindDto wind, int turnTimeoutSec) {
+            this.playerId = playerId;
+            this.wind = wind;
+            this.turnTimeoutSec = turnTimeoutSec;
+        }
+    }
+
+    /** One entry inside {@link RoundEnded#standings}. */
+    public static final class Standing {
+        public String playerId;
+        public int cash;
+
+        public Standing() {
+        }
+
+        public Standing(String playerId, int cash) {
+            this.playerId = playerId;
+            this.cash = cash;
+        }
+    }
+
+    /** Server -> Client: {@code RoundEnded{winnerPlayerId?, standings[]}}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static final class RoundEnded {
+        public String winnerPlayerId;
+        public List<Standing> standings;
+
+        public RoundEnded() {
+        }
+
+        public RoundEnded(String winnerPlayerId, List<Standing> standings) {
+            this.winnerPlayerId = winnerPlayerId;
+            this.standings = standings;
+        }
+    }
+
+    /** One entry inside {@link MatchEnded#finalStandings}. */
+    public static final class FinalStanding {
+        public String playerId;
+        public int cash;
+        public int damageDealt;
+        public int kills;
+
+        public FinalStanding() {
+        }
+
+        public FinalStanding(String playerId, int cash, int damageDealt, int kills) {
+            this.playerId = playerId;
+            this.cash = cash;
+            this.damageDealt = damageDealt;
+            this.kills = kills;
+        }
+    }
+
+    /** Server -> Client: {@code MatchEnded{finalStandings[]}}. */
+    public static final class MatchEnded {
+        public List<FinalStanding> finalStandings;
+
+        public MatchEnded() {
+        }
+
+        public MatchEnded(List<FinalStanding> finalStandings) {
+            this.finalStandings = finalStandings;
+        }
+    }
+
+    /** Server -> Client: {@code ErrorMsg{code, message}}. */
+    public static final class ErrorMsg {
+        public String code;
+        public String message;
+
+        public ErrorMsg() {
+        }
+
+        public ErrorMsg(String code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+    }
 }

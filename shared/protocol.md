@@ -88,6 +88,8 @@ Creates a new `WAITING` match, registers it in `MatchRegistry`, and makes the cr
 
 Rejected (via `FireRejected`-style `ErrorMsg`) if the match is full (max 8), already `IN_PROGRESS`, or does not exist.
 
+On success, the server replies to the joiner (only) with `MatchJoined` — see below. This was missing from an earlier draft of this doc: `CreateMatch` has `MatchCreated` as its direct reply, but `JoinMatch` had no documented success response, leaving a joining player with no way to learn their own `playerId`/`playerToken`. `MatchJoined` fixes that gap.
+
 #### `SetReady`
 
 ```json
@@ -135,6 +137,20 @@ No payload fields. Removes the sender from their current match (lobby or in-prog
 | `playerId` | string | Stable player id for this session, persists across reconnects. |
 
 Sent only to the creator, in reply to `CreateMatch`.
+
+#### `MatchJoined`
+
+```json
+{ "type": "MatchJoined", "v": 1, "requestId": "r2", "payload": { "matchId": "m-9f2a", "playerToken": "tok-7a2f...", "playerId": "p-2" } }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `matchId` | string | Echoes the joined match's id. |
+| `playerToken` | string | Secret, store in `sessionStorage`; used by `Rejoin`. Never broadcast to other players. |
+| `playerId` | string | Stable player id for this session, persists across reconnects. |
+
+Sent only to the joiner, in reply to a successful `JoinMatch` — the `JoinMatch` counterpart to `MatchCreated`. Followed by the usual `LobbyUpdate` broadcast to everyone (including the joiner) reflecting the new roster.
 
 #### `LobbyUpdate`
 
@@ -303,6 +319,8 @@ Weapon-specific behavior (MIRV children, bounces, tunneling) is still expressed 
 | `standings` | array | Per-player cash snapshot at round end, for the post-round summary UI. |
 
 Followed by `ShopOpened` (shop phase) and eventually a new `MatchStateSync` for the next round, or `MatchEnded` if `maxRounds` reached.
+
+**M2 note**: the shop phase (`ShopOpened`/`ShopPurchase`/`ShopUpdate`, section 5) is out of scope until M4. Until then, `RoundEnded` is immediately followed by the next round's fresh `MatchStateSync`/`TurnStarted` (or `MatchEnded`) with no shop pause in between — this is a temporary milestone simplification, not a protocol change.
 
 #### `MatchEnded`
 

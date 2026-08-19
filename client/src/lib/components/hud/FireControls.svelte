@@ -2,31 +2,27 @@
 	// Angle/power sliders + Fire button (PLAN.md section 3.1/3.2 HUD:
 	// AngleDial, PowerBar). M1 has no weapon-select UI — weaponId is
 	// hardcoded to basic_shell in fireInput.ts.
+	//
+	// M2: the server enforces active-player-only firing (protocol.md
+	// section 4, Fire "only accepted from the player whose turn it currently
+	// is"), but the client should still reflect that in the UI rather than
+	// let the local player click Fire and get silently rejected — so Fire is
+	// disabled whenever it isn't the local player's turn, in addition to the
+	// existing optimistic-disable while a shot is in flight.
 
-	import { onDestroy } from 'svelte';
-	import { wsClient } from '../../net/wsClient';
-	import { parseEnvelope } from '../../protocol/envelope';
 	import { sendFire } from '../../game/input/fireInput';
+	import { matchStore } from '../../stores/matchStore';
+	import { sessionStore } from '../../stores/sessionStore';
 
 	let angleDeg = 45;
 	let power = 50;
-	let disabled = false;
 
-	// Optimistic-disable per PLAN.md 3.2: disable on send, re-enable as soon
-	// as the next ShotResolved (or FireRejected) arrives.
-	const unsub = wsClient.onMessage((data) => {
-		const envelope = parseEnvelope(data);
-		if (!envelope) return;
-		if (envelope.type === 'ShotResolved' || envelope.type === 'FireRejected') {
-			disabled = false;
-		}
-	});
-
-	onDestroy(unsub);
+	$: isMyTurn =
+		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
+	$: disabled = !isMyTurn || $matchStore.awaitingShotResolution;
 
 	function fire(): void {
 		if (disabled) return;
-		disabled = true;
 		sendFire(angleDeg, power);
 	}
 </script>
@@ -43,7 +39,7 @@
 	</label>
 
 	<button class="fire-button" on:click={fire} disabled={disabled}>
-		{disabled ? 'Firing...' : 'Fire'}
+		{$matchStore.awaitingShotResolution ? 'Firing...' : isMyTurn ? 'Fire' : 'Not your turn'}
 	</button>
 </div>
 

@@ -1,9 +1,12 @@
 // TypeScript interfaces mirroring shared/protocol.md, hand-maintained per the
-// protocol doc's own convention (no codegen at v1). Only the M1 subset is
-// implemented here: the envelope, MatchStateSync, Fire, and ShotResolved.
-// See shared/protocol.md sections 1, 3 ("MatchStateSync"), and 4 ("Fire",
-// "ShotResolved") for the canonical shapes this file must stay in lockstep
-// with.
+// protocol doc's own convention (no codegen at v1). M1 covered the envelope,
+// MatchStateSync, Fire, and ShotResolved. M2 adds the lobby (section 3) and
+// turn/round-lifecycle (section 4) message shapes: CreateMatch, JoinMatch,
+// MatchCreated, MatchJoined, SetReady, LobbyUpdate, MatchStarted, Rejoin,
+// LeaveMatch, PlayerDisconnected/PlayerReconnected, TurnStarted,
+// FireRejected, RoundEnded, MatchEnded. Shop messages (section 5) are
+// explicitly deferred to M4 per protocol.md's M2 note and are not modeled
+// here yet.
 
 /** Generic envelope wrapping every message, both directions (protocol.md section 1). */
 export interface Envelope<TPayload = unknown> {
@@ -112,3 +115,133 @@ export interface ShotResolvedPayload {
 export type MatchStateSyncEnvelope = Envelope<MatchStateSyncPayload>;
 export type FireEnvelope = Envelope<FirePayload>;
 export type ShotResolvedEnvelope = Envelope<ShotResolvedPayload>;
+
+// ---------------------------------------------------------------------------
+// Lobby messages (protocol.md section 3)
+// ---------------------------------------------------------------------------
+
+export interface MatchConfig {
+	maxRounds: number;
+	maxPlayers: number;
+}
+
+export interface CreateMatchPayload {
+	displayName: string;
+	matchConfig?: Partial<MatchConfig> | null;
+}
+
+export interface JoinMatchPayload {
+	matchId: string;
+	displayName: string;
+}
+
+export interface SetReadyPayload {
+	ready: boolean;
+}
+
+export interface RejoinPayload {
+	matchId: string;
+	playerToken: string;
+}
+
+/** LeaveMatch has no payload fields (protocol.md section 3). */
+export type LeaveMatchPayload = Record<string, never>;
+
+export interface MatchCreatedPayload {
+	matchId: string;
+	joinCode: string;
+	playerToken: string;
+	playerId: string;
+}
+
+export interface MatchJoinedPayload {
+	matchId: string;
+	playerToken: string;
+	playerId: string;
+}
+
+export interface LobbyPlayer {
+	playerId: string;
+	displayName: string;
+	ready: boolean;
+	isHost: boolean;
+}
+
+export interface LobbyUpdatePayload {
+	matchId: string;
+	players: LobbyPlayer[];
+	hostId: string;
+}
+
+export interface MatchStartedPlayer {
+	playerId: string;
+	displayName: string;
+	color: string;
+	cash: number;
+}
+
+export interface MatchStartedPayload {
+	matchConfig: MatchConfig;
+	players: MatchStartedPlayer[];
+}
+
+export interface PlayerDisconnectedPayload {
+	playerId: string;
+}
+
+export interface PlayerReconnectedPayload {
+	playerId: string;
+}
+
+export type CreateMatchEnvelope = Envelope<CreateMatchPayload>;
+export type JoinMatchEnvelope = Envelope<JoinMatchPayload>;
+export type SetReadyEnvelope = Envelope<SetReadyPayload>;
+export type RejoinEnvelope = Envelope<RejoinPayload>;
+export type LeaveMatchEnvelope = Envelope<LeaveMatchPayload>;
+export type MatchCreatedEnvelope = Envelope<MatchCreatedPayload>;
+export type MatchJoinedEnvelope = Envelope<MatchJoinedPayload>;
+export type LobbyUpdateEnvelope = Envelope<LobbyUpdatePayload>;
+export type MatchStartedEnvelope = Envelope<MatchStartedPayload>;
+
+// ---------------------------------------------------------------------------
+// Match/turn lifecycle messages (protocol.md section 4)
+// ---------------------------------------------------------------------------
+
+export interface TurnStartedPayload {
+	playerId: string;
+	wind: Wind;
+	turnTimeoutSec: number;
+}
+
+/** One of a small fixed set of reason codes, e.g. NOT_YOUR_TURN, INVALID_WEAPON, MATCH_NOT_IN_PROGRESS, RATE_LIMITED. */
+export interface FireRejectedPayload {
+	reason: string;
+}
+
+export interface RoundEndedStanding {
+	playerId: string;
+	cash: number;
+}
+
+export interface RoundEndedPayload {
+	winnerPlayerId: string | null;
+	standings: RoundEndedStanding[];
+}
+
+export interface MatchEndedStanding {
+	playerId: string;
+	cash: number;
+	damageDealt: number;
+	kills: number;
+}
+
+export interface MatchEndedPayload {
+	finalStandings: MatchEndedStanding[];
+}
+
+export type TurnStartedEnvelope = Envelope<TurnStartedPayload>;
+export type FireRejectedEnvelope = Envelope<FireRejectedPayload>;
+export type RoundEndedEnvelope = Envelope<RoundEndedPayload>;
+export type MatchEndedEnvelope = Envelope<MatchEndedPayload>;
+export type PlayerDisconnectedEnvelope = Envelope<PlayerDisconnectedPayload>;
+export type PlayerReconnectedEnvelope = Envelope<PlayerReconnectedPayload>;

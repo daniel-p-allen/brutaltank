@@ -11,33 +11,36 @@ import org.junit.jupiter.api.Timeout;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * M1 integration test: boots the real server, connects real WS clients via
- * the JDK's HttpClient WebSocket, and exercises the actual protocol —
- * Ping/Pong, MatchStateSync on connect, and Fire -> ShotResolved broadcast
- * identically to both connected players (the M1 checkpoint from PLAN.md 5).
+ * M2 live integration test: boots the real server with real WS clients (JDK
+ * HttpClient WebSocket) and exercises the M2 checkpoint from PLAN.md 5 —
+ * "full multi-client match from lobby through round completion with turn
+ * gating": CreateMatch -> JoinMatch -> SetReady(x2) -> MatchStarted -> several
+ * turns of Fire/ShotResolved with turn gating actually enforced (a
+ * non-active player's Fire is rejected) -> through to RoundEnded.
+ *
+ * <p>Uses the test-only short turn-timeout constructor so the run doesn't
+ * need to sleep 30s per turn to reach round-end via the 60-turn safety cap.
  */
 class BrutalTankServerTest {
 
-    // Fresh server (and therefore a fresh hardcoded Match with empty player
-    // slots) per test, since M1's slot assignment is first-come-first-served
-    // and tests would otherwise contend for the same two slots.
-    private BrutalTankServer server;
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private BrutalTankServer server;
 
     @BeforeEach
     void startServer() {
-        server = new BrutalTankServer();
+        server = new BrutalTankServer(150, -1); // short turn timeout, default reconnect grace
         server.start();
     }
 
@@ -48,10 +51,9 @@ class BrutalTankServerTest {
         }
     }
 
-    /** Minimal test client: collects every full text frame received. */
+    /** Minimal test client: queues every full text frame received, in order. */
     private static final class TestClient {
-        final List<String> messages = new CopyOnWriteArrayList<>();
-        volatile CompletableFuture<String> nextMessage = new CompletableFuture<>();
+        final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
         final WebSocket socket;
         private final StringBuilder buffer = new StringBuilder();
 
@@ -65,8 +67,7 @@ class BrutalTankServerTest {
                             if (last) {
                                 String full = buffer.toString();
                                 buffer.setLength(0);
-                                messages.add(full);
-                                nextMessage.complete(full);
+                                queue.add(full);
                             }
                             webSocket.request(1);
                             return null;
@@ -75,14 +76,45 @@ class BrutalTankServerTest {
                     .get(5, TimeUnit.SECONDS);
         }
 
-        String awaitNext() throws Exception {
-            String msg = nextMessage.get(5, TimeUnit.SECONDS);
-            nextMessage = new CompletableFuture<>();
-            return msg;
-        }
-
         void send(String json) {
             socket.sendText(json, true);
+        }
+
+        void sendEnvelope(String type, String requestId, Object payload) throws Exception {
+            java.util.Map<String, Object> env = new java.util.LinkedHashMap<>();
+            env.put("type", type);
+            env.put("v", 1);
+            if (requestId != null) {
+                env.put("requestId", requestId);
+            }
+            env.put("payload", payload);
+            send(MAPPER.writeValueAsString(env));
+        }
+
+        /** Waits for and returns the next raw frame, of any type. */
+        JsonNode awaitNext() throws Exception {
+            String raw = queue.poll(5, TimeUnit.SECONDS);
+            if (raw == null) {
+                fail("timed out waiting for next message");
+            }
+            return MAPPER.readTree(raw);
+        }
+
+        /** Drains messages until one of the given type arrives (or times out), returning its payload. */
+        JsonNode awaitType(String type, long timeoutMs) throws Exception {
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            while (System.currentTimeMillis() < deadline) {
+                String raw = queue.poll(deadline - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+                if (raw == null) {
+                    break;
+                }
+                JsonNode node = MAPPER.readTree(raw);
+                if (type.equals(node.path("type").asText())) {
+                    return node.path("payload");
+                }
+            }
+            fail("timed out waiting for message of type " + type);
+            return null;
         }
 
         void close() {
@@ -95,12 +127,9 @@ class BrutalTankServerTest {
     void pingReceivesPong() throws Exception {
         TestClient client = new TestClient();
         try {
-            client.awaitNext(); // MatchStateSync on connect
-
             client.send("{\"type\":\"Ping\",\"v\":1,\"requestId\":\"abc123\",\"payload\":{}}");
-            String response = client.awaitNext();
+            JsonNode node = client.awaitNext();
 
-            JsonNode node = MAPPER.readTree(response);
             assertEquals("Pong", node.get("type").asText());
             assertEquals("abc123", node.get("requestId").asText());
             assertTrue(node.get("payload").get("serverTimeMs").asLong() > 0);
@@ -110,81 +139,87 @@ class BrutalTankServerTest {
     }
 
     @Test
-    @Timeout(10)
-    void connectReceivesMatchStateSyncWithHardcodedTanks() throws Exception {
-        TestClient client = new TestClient();
+    @Timeout(60)
+    void fullLobbyToRoundEndFlowWithTurnGating() throws Exception {
+        TestClient a = new TestClient();
+        TestClient b = new TestClient();
         try {
-            String sync = client.awaitNext();
-            JsonNode node = MAPPER.readTree(sync);
+            // --- CreateMatch / JoinMatch ---
+            // Note: Match.addPlayer() broadcasts LobbyUpdate to all current members
+            // *before* the direct MatchCreated/MatchJoined reply is sent back to the
+            // actor, so LobbyUpdate is observed first on the wire for each step below.
+            a.sendEnvelope("CreateMatch", "r1", java.util.Map.of("displayName", "Alice"));
+            a.awaitType("LobbyUpdate", 5000); // roster update for the (sole) host
+            JsonNode created = a.awaitType("MatchCreated", 5000);
+            String matchId = created.get("matchId").asText();
+            String playerIdA = created.get("playerId").asText();
+            assertNotNull(matchId);
 
-            assertEquals("MatchStateSync", node.get("type").asText());
-            JsonNode payload = node.get("payload");
-            assertEquals("m-1", payload.get("matchId").asText());
-            assertTrue(payload.get("terrain").get("heights").isArray());
-            assertEquals(1600, payload.get("terrain").get("heights").size());
-            assertEquals(2, payload.get("players").size());
-            assertEquals("p-1", payload.get("players").get(0).get("playerId").asText());
-            assertEquals(100.0, payload.get("players").get(0).get("tank").get("health").asDouble());
+            b.sendEnvelope("JoinMatch", "r2", java.util.Map.of("matchId", matchId, "displayName", "Bob"));
+            a.awaitType("LobbyUpdate", 5000); // roster update reflecting Bob's join
+            b.awaitType("LobbyUpdate", 5000);
+            JsonNode joined = b.awaitType("MatchJoined", 5000);
+            String playerIdB = joined.get("playerId").asText();
+            assertEquals(matchId, joined.get("matchId").asText());
+
+            // --- SetReady x2 -> MatchStarted ---
+            a.sendEnvelope("SetReady", "r3", java.util.Map.of("ready", true));
+            a.awaitType("LobbyUpdate", 5000); // not all ready yet
+
+            b.sendEnvelope("SetReady", "r4", java.util.Map.of("ready", true));
+
+            JsonNode startedA = a.awaitType("MatchStarted", 5000);
+            JsonNode startedB = b.awaitType("MatchStarted", 5000);
+            assertEquals(2, startedA.get("players").size());
+            assertEquals(startedA, startedB);
+
+            JsonNode syncA = a.awaitType("MatchStateSync", 5000);
+            assertEquals("IN_PROGRESS", syncA.get("status").asText());
+            b.awaitType("MatchStateSync", 5000);
+
+            JsonNode turnA = a.awaitType("TurnStarted", 5000);
+            JsonNode turnB = b.awaitType("TurnStarted", 5000);
+            String activePlayerId = turnA.get("playerId").asText();
+            assertEquals(activePlayerId, turnB.get("playerId").asText());
+
+            TestClient active = activePlayerId.equals(playerIdA) ? a : b;
+            TestClient inactive = activePlayerId.equals(playerIdA) ? b : a;
+
+            // --- Turn gating: the non-active player's Fire must be rejected ---
+            inactive.sendEnvelope("Fire", "rBad", java.util.Map.of(
+                    "weaponId", "basic_shell", "angleDeg", 45, "power", 50));
+            JsonNode rejected = inactive.awaitType("FireRejected", 5000);
+            assertEquals("NOT_YOUR_TURN", rejected.get("reason").asText());
+
+            // --- The active player's Fire is accepted and broadcast identically ---
+            active.sendEnvelope("Fire", "rGood", java.util.Map.of(
+                    "weaponId", "basic_shell", "angleDeg", 40, "power", 60));
+            JsonNode shotA = a.awaitType("ShotResolved", 5000);
+            JsonNode shotB = b.awaitType("ShotResolved", 5000);
+            assertEquals(shotA, shotB);
+            assertEquals(activePlayerId, shotA.get("shooterId").asText());
+
+            // --- Drive the rest of the round via the short auto-skip timer (no
+            // more firing) until RoundEnded arrives; the 60-turn safety cap
+            // guarantees this terminates even with nobody eliminated. ---
+            JsonNode roundEnded = a.awaitType("RoundEnded", 20000);
+            assertNotNull(roundEnded);
+            assertTrue(roundEnded.get("standings").isArray());
+            assertEquals(2, roundEnded.get("standings").size());
         } finally {
-            client.close();
+            a.close();
+            b.close();
         }
     }
 
     @Test
     @Timeout(15)
-    void fireBroadcastsIdenticalShotResolvedToBothPlayers() throws Exception {
-        TestClient clientA = new TestClient();
-        TestClient clientB = new TestClient();
-        try {
-            // Drain each client's initial MatchStateSync (order across sockets isn't
-            // guaranteed to interleave, so just consume one message per client).
-            clientA.awaitNext();
-            clientB.awaitNext();
-
-            clientA.send("{\"type\":\"Fire\",\"v\":1,\"requestId\":\"r10\",\"payload\":"
-                    + "{\"weaponId\":\"basic_shell\",\"angleDeg\":45,\"power\":70}}");
-
-            String resolvedA = clientA.awaitNext();
-            String resolvedB = clientB.awaitNext();
-
-            JsonNode nodeA = MAPPER.readTree(resolvedA);
-            JsonNode nodeB = MAPPER.readTree(resolvedB);
-
-            assertEquals("ShotResolved", nodeA.get("type").asText());
-            assertEquals("ShotResolved", nodeB.get("type").asText());
-            // Identical payload for both clients (the core M1 checkpoint).
-            assertEquals(nodeA.get("payload"), nodeB.get("payload"));
-
-            JsonNode payload = nodeA.get("payload");
-            assertEquals("p-1", payload.get("shooterId").asText());
-            assertEquals("basic_shell", payload.get("weaponId").asText());
-            assertTrue(payload.get("trajectory").size() >= 2);
-            assertTrue(payload.get("trajectory").size() <= 40);
-            JsonNode terrainDelta = payload.get("terrainDelta");
-            assertTrue(terrainDelta.get("endX").asInt() >= terrainDelta.get("startX").asInt());
-            assertEquals(
-                    terrainDelta.get("endX").asInt() - terrainDelta.get("startX").asInt() + 1,
-                    terrainDelta.get("heights").size());
-        } finally {
-            clientA.close();
-            clientB.close();
-        }
-    }
-
-    @Test
-    @Timeout(10)
-    void firingUnknownWeaponIsRejectedNotCrashed() throws Exception {
+    void joiningNonexistentMatchGetsErrorMsg() throws Exception {
         TestClient client = new TestClient();
         try {
-            client.awaitNext(); // MatchStateSync
-
-            client.send("{\"type\":\"Fire\",\"v\":1,\"requestId\":\"r11\",\"payload\":"
-                    + "{\"weaponId\":\"nuke\",\"angleDeg\":45,\"power\":70}}");
-
-            String response = client.awaitNext();
-            JsonNode node = MAPPER.readTree(response);
-            assertEquals("FireRejected", node.get("type").asText());
-            assertFalse(node.get("payload").get("reason").asText().isEmpty());
+            client.sendEnvelope("JoinMatch", "r1", java.util.Map.of("matchId", "m-bogus", "displayName", "X"));
+            JsonNode error = client.awaitType("ErrorMsg", 5000);
+            assertEquals("MATCH_NOT_FOUND", error.get("code").asText());
         } finally {
             client.close();
         }
