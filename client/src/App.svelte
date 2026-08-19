@@ -12,13 +12,19 @@
 	import PostMatchScreen from './lib/components/PostMatchScreen.svelte';
 	import { connectionStore } from './lib/stores/connectionStore';
 	import { matchStore } from './lib/stores/matchStore';
+	import { lobbyStore } from './lib/stores/lobbyStore';
 
 	type Screen = 'menu' | 'lobby' | 'match' | 'post-match';
 
+	// The server never actually sends a MatchStateSync (the only message that
+	// sets matchStore.status) while a match is WAITING — that status only
+	// becomes known client-side via LobbyUpdate, which populates lobbyStore
+	// instead. So the lobby phase must be detected from lobbyStore.matchId,
+	// not matchStore.status === 'WAITING' (which never actually happens).
 	$: screen = ((): Screen => {
 		if ($matchStore.matchEndedInfo || $matchStore.status === 'COMPLETE') return 'post-match';
 		if ($matchStore.status === 'IN_PROGRESS') return 'match';
-		if ($matchStore.status === 'WAITING') return 'lobby';
+		if ($lobbyStore.matchId) return 'lobby';
 		return 'menu';
 	})();
 </script>
