@@ -65,12 +65,15 @@ public final class DamageCalculator {
                 damage *= DIRECT_HIT_MULTIPLIER;
             }
 
-            double newHealth = Math.max(0.0, tank.health() - damage);
+            // Round to whole HP so health never drifts into fractional
+            // display values (e.g. "78.34") on the client.
+            double roundedDamage = Math.round(damage);
+            double newHealth = Math.max(0.0, Math.round(tank.health() - roundedDamage));
             boolean eliminated = newHealth <= 0.0;
-            damageEvents.add(new DamageResult(tank.playerId(), damage, newHealth, eliminated));
+            damageEvents.add(new DamageResult(tank.playerId(), roundedDamage, newHealth, eliminated));
 
             if (!tank.playerId().equals(shooterId)) {
-                cashFromDamage += (int) Math.round(damage * CASH_PER_DAMAGE);
+                cashFromDamage += (int) (roundedDamage * CASH_PER_DAMAGE);
             }
         }
 

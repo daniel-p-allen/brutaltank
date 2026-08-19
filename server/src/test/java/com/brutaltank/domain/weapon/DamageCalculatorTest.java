@@ -23,9 +23,12 @@ class DamageCalculatorTest {
 
         assertEquals(1, outcome.damageEvents.size());
         DamageCalculator.DamageResult result = outcome.damageEvents.get(0);
-        // Direct hit (distance 0 <= 8) applies the x1.3 bonus on top of full falloff (1.0).
-        assertEquals(CENTER_DAMAGE * 1.3, result.damage(), 0.001);
-        assertEquals(100 - CENTER_DAMAGE * 1.3, result.newHealth(), 0.001);
+        // Direct hit (distance 0 <= 8) applies the x1.3 bonus on top of full falloff (1.0),
+        // then damage/health are rounded to whole HP (32.5 -> 33) so the client never
+        // has to display a fractional health value.
+        double expectedDamage = Math.round(CENTER_DAMAGE * 1.3);
+        assertEquals(expectedDamage, result.damage(), 0.001);
+        assertEquals(100 - expectedDamage, result.newHealth(), 0.001);
         assertFalse(result.eliminated());
     }
 
