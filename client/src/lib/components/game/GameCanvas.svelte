@@ -6,6 +6,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { matchStore } from '../../stores/matchStore';
 	import { pendingShotAnimation, clearShotAnimation } from '../../stores/shotAnimationStore';
+	import { sessionStore } from '../../stores/sessionStore';
+	import { aimStore, type AimState } from '../../stores/aimStore';
 	import { drawTerrain } from '../../game/render/terrainRenderer';
 	import { drawTanks } from '../../game/render/tankRenderer';
 	import { drawProjectile, isAnimationFinished } from '../../game/render/projectileRenderer';
@@ -41,9 +43,13 @@
 		matchEndedInfo: null
 	};
 	let activeShot: PendingShotAnimation | null = null;
+	let localPlayerId: string | null = null;
+	let aim: AimState = { angleDeg: 45, power: 60 };
 
 	const unsubMatch = matchStore.subscribe((s) => (scene = s));
 	const unsubShot = pendingShotAnimation.subscribe((s) => (activeShot = s));
+	const unsubSession = sessionStore.subscribe((s) => (localPlayerId = s.playerId));
+	const unsubAim = aimStore.subscribe((s) => (aim = s));
 
 	function frame(): void {
 		const ctx = canvasEl?.getContext('2d');
@@ -56,7 +62,7 @@
 			ctx.fillRect(0, 0, width, height);
 
 			drawTerrain(ctx, scene.terrain.heights, viewport);
-			drawTanks(ctx, scene.players, viewport);
+			drawTanks(ctx, scene.players, viewport, localPlayerId, aim.angleDeg);
 
 			if (activeShot) {
 				const elapsed = performance.now() - activeShot.startedAtMs;
@@ -77,6 +83,8 @@
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		unsubMatch();
 		unsubShot();
+		unsubSession();
+		unsubAim();
 	});
 </script>
 

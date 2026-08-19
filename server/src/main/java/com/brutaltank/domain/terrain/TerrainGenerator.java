@@ -51,7 +51,12 @@ public final class TerrainGenerator {
         }
         double[] work = new double[size + 1];
 
-        double baseHeight = lerp(Terrain.CEILING, Terrain.FLOOR, 0.5);
+        // Baseline sits low (near FLOOR), not at the vertical midpoint: flat-ish
+        // terrain should only occupy roughly the bottom 10% of the screen,
+        // leaving headroom above to see weapon arcs and, later, for hills/
+        // mountains to rise up toward CEILING without the whole map feeling
+        // like a wall of dirt by default.
+        double baseHeight = lerp(Terrain.CEILING, Terrain.FLOOR, 0.9);
         work[0] = baseHeight + (rng.nextDouble() - 0.5) * INITIAL_DISPLACEMENT;
         work[size] = baseHeight + (rng.nextDouble() - 0.5) * INITIAL_DISPLACEMENT;
 

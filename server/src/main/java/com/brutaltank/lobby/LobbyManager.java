@@ -7,9 +7,9 @@ import com.brutaltank.net.Envelopes;
 import com.brutaltank.net.MessageSink;
 import com.brutaltank.net.PlayerSession;
 import com.brutaltank.protocol.Payloads;
+import com.brutaltank.util.MatchCodeGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -45,7 +45,10 @@ public final class LobbyManager {
     }
 
     public void handleCreateMatch(PlayerSession session, MessageSink sink, String requestId, Payloads.CreateMatch payload) {
-        String matchId = "m-" + UUID.randomUUID().toString().substring(0, 8);
+        String matchId = MatchCodeGenerator.generate();
+        while (registry.get(matchId) != null) {
+            matchId = MatchCodeGenerator.generate();
+        }
         MatchConfig config = MatchConfig.fromDto(payload.matchConfig);
         Match match = new Match(matchId, mapper, config, scheduler);
         if (turnTimeoutMsOverride > 0) {
@@ -74,7 +77,7 @@ public final class LobbyManager {
     }
 
     public void handleJoinMatch(PlayerSession session, MessageSink sink, String requestId, Payloads.JoinMatch payload) {
-        Match match = registry.get(payload.matchId);
+        Match match = registry.get(MatchCodeGenerator.normalize(payload.matchId));
         if (match == null) {
             Envelopes.send(sink, mapper, "ErrorMsg", requestId,
                     new Payloads.ErrorMsg("MATCH_NOT_FOUND", "No match with that code exists."));
