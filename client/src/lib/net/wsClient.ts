@@ -61,6 +61,11 @@ export class WsClient {
 		}
 	}
 
+	/** Convenience wrapper: JSON.stringify's an envelope object and sends it. */
+	sendJson(envelope: unknown): void {
+		this.send(JSON.stringify(envelope));
+	}
+
 	onMessage(handler: MessageHandler): () => void {
 		this.messageHandlers.add(handler);
 		return () => this.messageHandlers.delete(handler);
