@@ -12,6 +12,12 @@ public final class Player {
     public int cash;
     public final Map<String, Integer> loadout = new LinkedHashMap<>();
     public String activeShieldId;
+    /**
+     * Cumulative damage absorbed by the current Absorb shield activation
+     * (M3, PLAN.md 4.4: "up to 80 cumulative absorption before breaking").
+     * Reset to 0 whenever a new shield is activated; unused by other shields.
+     */
+    public double shieldAbsorbedSoFar;
     public final Tank tank;
 
     public Player(String playerId, String displayName, String color, int cash, Tank tank) {

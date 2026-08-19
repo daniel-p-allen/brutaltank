@@ -13,6 +13,7 @@
 	import { sendFire } from '../../game/input/fireInput';
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
+	import WeaponSelect from './WeaponSelect.svelte';
 
 	let angleDeg = 45;
 	let power = 50;
@@ -26,6 +27,8 @@
 		sendFire(angleDeg, power);
 	}
 </script>
+
+<WeaponSelect disabled={disabled} />
 
 <div class="fire-controls">
 	<label class="control">

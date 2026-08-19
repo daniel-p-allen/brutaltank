@@ -106,7 +106,7 @@ class MatchTurnStateMachineTest {
         match.setReady(p1.playerId(), true);
         match.setReady(p2.playerId(), true);
 
-        Match.FireOutcome outcome = match.fire(p1.playerId(), "r1", "nuke", 45, 50);
+        Match.FireOutcome outcome = match.fire(p1.playerId(), "r1", "totally_fake_weapon", 45, 50);
         assertFalse(outcome.accepted());
         assertEquals("INVALID_WEAPON", outcome.rejectReason());
     }

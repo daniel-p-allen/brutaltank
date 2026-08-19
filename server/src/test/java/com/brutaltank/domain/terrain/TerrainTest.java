@@ -50,4 +50,37 @@ class TerrainTest {
         assertEquals(0, result.startX());
         assertEquals(35, result.endX());
     }
+
+    @Test
+    void digCraterDepthMultiplierDigsDeeperAtSameRadius() {
+        // M3 Digger weapon: craterDepthMultiplier 1.8 vs the default 1.0,
+        // same radius -> a visibly deeper crater at the center column.
+        int[] flatA = new int[400];
+        java.util.Arrays.fill(flatA, 300);
+        Terrain normal = new Terrain(flatA);
+        normal.applyCrater(200, 20, 1.0);
+
+        int[] flatB = new int[400];
+        java.util.Arrays.fill(flatB, 300);
+        Terrain dug = new Terrain(flatB);
+        dug.applyCrater(200, 20, 1.8);
+
+        int normalCenterHeight = normal.heightAt(200);
+        int dugCenterHeight = dug.heightAt(200);
+        assertTrue(dugCenterHeight > normalCenterHeight,
+                "digger multiplier should dig deeper: normal=" + normalCenterHeight + " dug=" + dugCenterHeight);
+    }
+
+    @Test
+    void heightsInRangeReturnsClampedSlice() {
+        int[] flat = new int[400];
+        java.util.Arrays.fill(flat, 300);
+        Terrain terrain = new Terrain(flat);
+
+        int[] slice = terrain.heightsInRange(-10, 5);
+        assertEquals(6, slice.length); // clamped to [0,5]
+
+        int[] full = terrain.heightsInRange(0, 399);
+        assertEquals(400, full.length);
+    }
 }

@@ -6,6 +6,7 @@ import com.brutaltank.domain.terrain.Terrain;
 import com.brutaltank.domain.terrain.TerrainGenerator;
 import com.brutaltank.domain.weapon.DamageCalculator;
 import com.brutaltank.domain.weapon.ProjectileSim;
+import com.brutaltank.domain.weapon.ShieldDef;
 import com.brutaltank.domain.weapon.WeaponDef;
 import com.brutaltank.net.Envelopes;
 import com.brutaltank.net.MessageSink;
@@ -185,7 +186,16 @@ public final class Match {
         String token = "tok-" + UUID.randomUUID();
         String color = COLORS[players.size() % COLORS.length];
         Player domainPlayer = new Player(playerId, displayName, color, STARTING_CASH, new Tank(0, 0, STARTING_HEALTH));
-        domainPlayer.loadout.put("basic_shell", -1); // unlimited, per protocol convention
+        // M3 has no shop yet (M4): grant every player a full starting loadout
+        // (all 10 weapons at their PLAN.md 4.4 default quantities, plus 1 of
+        // each shield) so the whole roster is immediately testable without a
+        // shop. -1 conventionally means "unlimited" (basic_shell).
+        for (WeaponDef w : WeaponDef.all().values()) {
+            domainPlayer.loadout.put(w.weaponId(), w.defaultQty());
+        }
+        for (ShieldDef s : ShieldDef.all().values()) {
+            domainPlayer.loadout.put(s.shieldId(), 1);
+        }
 
         MatchPlayer mp = new MatchPlayer(domainPlayer, token, sink);
         mp.isHost = players.isEmpty();
@@ -419,14 +429,24 @@ public final class Match {
         if (shooter == null || shooter.departed || !shooter.player.tank.alive) {
             return FireOutcome.rejected("NOT_YOUR_TURN");
         }
-        // M2 scope: weapon roster is just the free/unlimited basic shell (M3 adds the rest);
-        // still validated against the player's loadout rather than hardcoded, per task spec.
+        // M3: validated against the player's loadout, including quantity. -1 is the
+        // "unlimited" convention (protocol.md MatchStateSync note) and never decrements;
+        // any other value is a real remaining count, rejected at 0 and decremented on
+        // a successful fire. This applies uniformly to weapons and shields (shields are
+        // also loadout entries, consumed on activation since there's no shop yet).
         Integer qty = shooter.player.loadout.get(weaponId);
         if (qty == null) {
             return FireOutcome.rejected("INVALID_WEAPON");
         }
+        if (qty == 0) {
+            return FireOutcome.rejected("OUT_OF_AMMO");
+        }
 
         cancelPendingTimeout();
+
+        if (qty != -1) {
+            shooter.player.loadout.put(weaponId, qty - 1);
+        }
 
         Payloads.ShotResolved resolved = resolveShot(shooter, weaponId, angleDeg, power);
         resolveTurnAdvance(resolved, requestId);
@@ -542,7 +562,27 @@ public final class Match {
     // Shot resolution (reuses M1 domain code as-is)
     // =================================================================
 
+    /**
+     * One blast detonation point within a shot: most weapons produce exactly
+     * one; MIRV (children) and cluster bomb (primary + bomblets) produce
+     * several, all merged into a single {@code ShotResolved} per
+     * shared/protocol.md 4 ("this document does not mandate a separate
+     * per-child sub-message at v1").
+     */
+    private record DetonationSpec(double x, double y, double blastRadius, double centerDamage, double craterDepthMultiplier) {
+        DetonationSpec(double x, double y, double blastRadius, double centerDamage) {
+            this(x, y, blastRadius, centerDamage, 1.0);
+        }
+    }
+
+    private static final double[] MIRV_SPREAD_OFFSETS_DEG = {-15.0, -5.0, 5.0, 15.0};
+    private static final double[] CLUSTER_BOMBLET_OFFSETS_X = {-50.0, -25.0, 25.0, 50.0};
+
     private Payloads.ShotResolved resolveShot(MatchPlayer shooter, String weaponId, double angleDeg, double power) {
+        if (ShieldDef.isShieldId(weaponId)) {
+            return resolveShieldActivation(shooter, weaponId);
+        }
+
         WeaponDef weapon = WeaponDef.byId(weaponId);
         double clampedPower = Math.max(0, Math.min(100, power));
 
@@ -554,39 +594,210 @@ public final class Match {
             targets.add(new ProjectileSim.TankTarget(p.player.playerId, p.player.tank.x, p.player.tank.y));
         }
 
-        ProjectileSim.Result sim = ProjectileSim.simulate(
-                shooter.player.tank.x, shooter.player.tank.y, angleDeg, clampedPower,
-                windStrength, terrain, targets);
+        double startX = shooter.player.tank.x;
+        double startY = shooter.player.tank.y;
 
-        Terrain.CraterResult crater = terrain.applyCrater(
-                (int) Math.round(sim.impactX), weapon.blastRadius());
+        List<double[]> mergedTrajectory = new ArrayList<>();
+        List<DetonationSpec> detonations = new ArrayList<>();
+        double impactX;
+        double impactY;
 
-        List<DamageCalculator.TankState> tankStates = new ArrayList<>();
-        for (MatchPlayer p : players.values()) {
-            if (p.departed || !p.player.tank.alive) {
-                continue;
+        switch (weapon.behavior()) {
+            case TUNNELING -> {
+                ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
+                        windStrength, terrain, targets, WeaponDef.Behavior.TUNNELING,
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                mergedTrajectory.addAll(sim.resampledTrajectory);
+                detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
+                impactX = sim.impactX;
+                impactY = sim.impactY;
             }
-            tankStates.add(new DamageCalculator.TankState(p.player.playerId, p.player.tank.x, p.player.tank.y, p.player.tank.health));
+            case BOUNCING -> {
+                ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
+                        windStrength, terrain, targets, WeaponDef.Behavior.BOUNCING,
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                mergedTrajectory.addAll(sim.resampledTrajectory);
+                detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
+                impactX = sim.impactX;
+                impactY = sim.impactY;
+            }
+            case MIRV -> {
+                // Simplification (see class notes / report): find the apex via a
+                // STANDARD-shaped simulate() call with stopAtApex=true, then re-simulate
+                // 4 children from that point at +/-5/15 degree spread, same power. If the
+                // shot hits something before ever reaching an apex (e.g. a very steep,
+                // short, near-point-blank shot), it detonates as a single non-split blast
+                // using the per-child stats rather than splitting mid-flight.
+                ProjectileSim.Result apexSim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
+                        windStrength, terrain, targets, WeaponDef.Behavior.STANDARD,
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), true);
+                mergedTrajectory.addAll(apexSim.resampledTrajectory);
+                if (!apexSim.stoppedAtApex) {
+                    detonations.add(new DetonationSpec(apexSim.impactX, apexSim.impactY, weapon.blastRadius(), weapon.centerDamage()));
+                    impactX = apexSim.impactX;
+                    impactY = apexSim.impactY;
+                } else {
+                    for (double offset : MIRV_SPREAD_OFFSETS_DEG) {
+                        ProjectileSim.Result child = ProjectileSim.simulate(
+                                apexSim.impactX, apexSim.impactY, angleDeg + offset, clampedPower,
+                                windStrength, terrain, targets, WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+                        mergedTrajectory.addAll(child.resampledTrajectory);
+                        detonations.add(new DetonationSpec(child.impactX, child.impactY, weapon.blastRadius(), weapon.centerDamage()));
+                    }
+                    // Reported impact is the split point itself, the one meaningful
+                    // single point for a multi-child shot.
+                    impactX = apexSim.impactX;
+                    impactY = apexSim.impactY;
+                }
+            }
+            case CLUSTER -> {
+                ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
+                        windStrength, terrain, targets, WeaponDef.Behavior.STANDARD,
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                mergedTrajectory.addAll(sim.resampledTrajectory);
+                impactX = sim.impactX;
+                impactY = sim.impactY;
+                // Primary detonation uses the weapon's primary blastRadius/centerDamage.
+                detonations.add(new DetonationSpec(impactX, impactY, weapon.blastRadius(), weapon.centerDamage()));
+                // 4 bomblets at fixed sideways world-x offsets (no real bomblet flight
+                // physics, per task spec's explicit simplification): each detonates at
+                // the local ground height sampled *before* any of this shot's craters are
+                // applied (bomblets are conceptually simultaneous with the primary hit),
+                // using the bomblet blast radius but the same center damage as primary.
+                for (double offset : CLUSTER_BOMBLET_OFFSETS_X) {
+                    int bombletX = (int) Math.round(Math.max(0, Math.min(terrain.width() - 1, impactX + offset)));
+                    double bombletY = terrain.heightAt(bombletX);
+                    detonations.add(new DetonationSpec(bombletX, bombletY, weapon.bombletBlastRadius(), weapon.centerDamage()));
+                }
+            }
+            default -> { // STANDARD, DIGGER
+                ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
+                        windStrength, terrain, targets, WeaponDef.Behavior.STANDARD,
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                mergedTrajectory.addAll(sim.resampledTrajectory);
+                detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage(),
+                        weapon.craterDepthMultiplier()));
+                impactX = sim.impactX;
+                impactY = sim.impactY;
+            }
         }
 
-        DamageCalculator.Outcome outcome = DamageCalculator.resolve(
-                shooter.player.playerId, sim.impactX, sim.impactY,
-                weapon.blastRadius(), weapon.centerDamage(), tankStates);
+        return applyDetonations(shooter, weaponId, mergedTrajectory, impactX, impactY, detonations);
+    }
+
+    /**
+     * Shield activation (PLAN.md 4.4: "Shields are activated by spending a
+     * turn... the Fire message's weaponId can reference a shield id;
+     * RESOLVING sets activeShieldId instead of running projectile physics").
+     *
+     * <p><b>Wire encoding choice</b> (protocol.md doesn't mandate a shape for
+     * this, since it predates M3): to keep every turn resolving as a normal
+     * {@code ShotResolved} broadcast (so clients don't need a special-case
+     * message type), this sends a zero-length "shot": a single trajectory
+     * point and impact at the shooter's own tank position, and a one-column
+     * {@code terrainDelta} at that same column reporting the (unchanged)
+     * current height there — a genuine no-op delta, not a real crater.
+     * {@code damageEvents}/{@code cashEarned} are empty.
+     */
+    private Payloads.ShotResolved resolveShieldActivation(MatchPlayer shooter, String shieldId) {
+        shooter.player.activeShieldId = shieldId;
+        shooter.player.shieldAbsorbedSoFar = 0;
+
+        int tankX = (int) Math.round(shooter.player.tank.x);
+        double tankY = shooter.player.tank.y;
+        int col = Math.max(0, Math.min(terrain.width() - 1, tankX));
+
+        Payloads.ShotResolved resolved = new Payloads.ShotResolved();
+        resolved.shooterId = shooter.player.playerId;
+        resolved.weaponId = shieldId;
+        resolved.trajectory = new ArrayList<>();
+        resolved.trajectory.add(new Payloads.TrajectoryPoint(tankX, tankY));
+        resolved.impact = new Payloads.Impact(tankX, tankY);
+        resolved.terrainDelta = new Payloads.TerrainDelta(col, col, new int[] {terrain.heightAt(col)});
+        resolved.damageEvents = new ArrayList<>();
+        resolved.cashEarned = new ArrayList<>();
+        return resolved;
+    }
+
+    /**
+     * Applies one or more detonations (craters + damage) from a single shot
+     * and merges the result into one {@code ShotResolved}, per-target shield
+     * mitigation applied before health is subtracted (PLAN.md 4.3). Detonations
+     * are processed in order so a multi-impact weapon's later hits see the
+     * damage/shield state left by its earlier hits within the same shot.
+     */
+    private Payloads.ShotResolved applyDetonations(MatchPlayer shooter, String weaponId,
+                                                     List<double[]> trajectory, double impactX, double impactY,
+                                                     List<DetonationSpec> detonations) {
+        Map<String, Double> workingHealth = new LinkedHashMap<>();
+        for (MatchPlayer p : players.values()) {
+            if (!p.departed && p.player.tank.alive) {
+                workingHealth.put(p.player.playerId, p.player.tank.health);
+            }
+        }
+
+        Map<String, Payloads.DamageEvent> damageByPlayer = new LinkedHashMap<>();
+        List<Payloads.CashEarned> cashEarned = new ArrayList<>();
+        int cashFromDamage = 0;
+        int minStart = Integer.MAX_VALUE;
+        int maxEnd = Integer.MIN_VALUE;
+
+        for (DetonationSpec d : detonations) {
+            Terrain.CraterResult crater = terrain.applyCrater(
+                    (int) Math.round(d.x()), d.blastRadius(), d.craterDepthMultiplier());
+            minStart = Math.min(minStart, crater.startX());
+            maxEnd = Math.max(maxEnd, crater.endX());
+
+            List<DamageCalculator.TankState> tankStates = new ArrayList<>();
+            for (MatchPlayer p : players.values()) {
+                Double hp = workingHealth.get(p.player.playerId);
+                if (hp == null) {
+                    continue;
+                }
+                tankStates.add(new DamageCalculator.TankState(p.player.playerId, p.player.tank.x, p.player.tank.y, hp));
+            }
+
+            DamageCalculator.Outcome outcome = DamageCalculator.resolve(
+                    shooter.player.playerId, d.x(), d.y(), d.blastRadius(), d.centerDamage(), tankStates);
+
+            for (DamageCalculator.DamageResult dr : outcome.damageEvents) {
+                MatchPlayer target = players.get(dr.playerId());
+                boolean isDirectHit = distance(target.player.tank.x, target.player.tank.y, d.x(), d.y())
+                        <= DamageCalculator.DIRECT_HIT_RADIUS;
+                double mitigatedDamage = applyShieldMitigation(target, dr.damage(), isDirectHit, cashEarned);
+
+                double prevHealth = workingHealth.get(dr.playerId());
+                double newHealth = Math.max(0.0, Math.round(prevHealth - mitigatedDamage));
+                boolean eliminated = newHealth <= 0.0;
+                workingHealth.put(dr.playerId(), newHealth);
+
+                Payloads.DamageEvent existing = damageByPlayer.get(dr.playerId());
+                double cumulativeDamage = (existing != null ? existing.damage : 0.0) + mitigatedDamage;
+                damageByPlayer.put(dr.playerId(), new Payloads.DamageEvent(dr.playerId(), cumulativeDamage, newHealth, eliminated));
+
+                if (!dr.playerId().equals(shooter.player.playerId)) {
+                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
+                }
+            }
+        }
+
+        if (cashFromDamage > 0) {
+            shooter.player.cash += cashFromDamage;
+            cashEarned.add(new Payloads.CashEarned(shooter.player.playerId, cashFromDamage));
+        }
 
         List<Payloads.DamageEvent> damageEvents = new ArrayList<>();
-        List<Payloads.CashEarned> cashEarned = new ArrayList<>();
-
-        for (DamageCalculator.DamageResult d : outcome.damageEvents) {
-            MatchPlayer target = players.get(d.playerId());
-            target.player.tank.health = d.newHealth();
-            if (d.eliminated()) {
+        for (Payloads.DamageEvent ev : damageByPlayer.values()) {
+            MatchPlayer target = players.get(ev.playerId);
+            target.player.tank.health = ev.newHealth;
+            if (ev.eliminated) {
                 target.player.tank.alive = false;
             }
-            damageEvents.add(new Payloads.DamageEvent(d.playerId(), d.damage(), d.newHealth(), d.eliminated()));
+            damageEvents.add(ev);
 
-            if (!target.player.playerId.equals(shooter.player.playerId)) {
-                shooter.damageDealt += (int) Math.round(d.damage());
-                if (d.eliminated()) {
+            if (!ev.playerId.equals(shooter.player.playerId)) {
+                shooter.damageDealt += (int) Math.round(ev.damage);
+                if (ev.eliminated) {
                     shooter.kills++;
                     shooter.player.cash += ELIMINATION_BONUS;
                     cashEarned.add(new Payloads.CashEarned(shooter.player.playerId, ELIMINATION_BONUS));
@@ -594,26 +805,97 @@ public final class Match {
             }
         }
 
-        for (DamageCalculator.CashResult c : outcome.cashEarned) {
-            MatchPlayer earner = players.get(c.playerId());
-            if (earner != null) {
-                earner.player.cash += c.amount();
-            }
-            cashEarned.add(new Payloads.CashEarned(c.playerId(), c.amount()));
-        }
-
         Payloads.ShotResolved resolved = new Payloads.ShotResolved();
         resolved.shooterId = shooter.player.playerId;
         resolved.weaponId = weaponId;
         resolved.trajectory = new ArrayList<>();
-        for (double[] pt : sim.resampledTrajectory) {
+        for (double[] pt : trajectory) {
             resolved.trajectory.add(new Payloads.TrajectoryPoint(pt[0], pt[1]));
         }
-        resolved.impact = new Payloads.Impact(sim.impactX, sim.impactY);
-        resolved.terrainDelta = new Payloads.TerrainDelta(crater.startX(), crater.endX(), crater.heights());
+        resolved.impact = new Payloads.Impact(impactX, impactY);
+        if (minStart <= maxEnd) {
+            resolved.terrainDelta = new Payloads.TerrainDelta(minStart, maxEnd, terrain.heightsInRange(minStart, maxEnd));
+        } else {
+            int col = Math.max(0, Math.min(terrain.width() - 1, (int) Math.round(impactX)));
+            resolved.terrainDelta = new Payloads.TerrainDelta(col, col, new int[] {terrain.heightAt(col)});
+        }
         resolved.damageEvents = damageEvents;
         resolved.cashEarned = cashEarned;
         return resolved;
+    }
+
+    private static double distance(double x1, double y1, double x2, double y2) {
+        double dx = x1 - x2;
+        double dy = y1 - y2;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /**
+     * Shield mitigation, applied before subtracting from health (PLAN.md
+     * 4.3). Contained here rather than in {@link DamageCalculator} per the
+     * task spec ("wrap/post-process around it in Match" rather than rewrite
+     * its falloff math). Judgment calls on exactly when each shield clears
+     * {@code activeShieldId} (PLAN.md 4.4's wording is loose on this):
+     * <ul>
+     *   <li><b>Absorb</b> clears once cumulative absorbed damage (rawDamage -
+     *       mitigatedDamage, summed across hits since activation) would
+     *       exceed the 80 threshold — "breaking" mid-resolution of the hit
+     *       that pushes it over.</li>
+     *   <li><b>Deflect</b> clears immediately after negating one direct hit
+     *       (binary block, "first direct hit... then breaks"); a near-miss
+     *       (splash, not a direct hit) applies at 60% and does not break it,
+     *       so it keeps blocking direct hits until one lands.</li>
+     *   <li><b>Reflect</b> never breaks on its own — it's a standing -30%/
+     *       cash-back effect per PLAN.md ("never breaks... true reflection
+     *       deferred as stretch goal") — it only clears when the player
+     *       spends a later turn activating a different/new shield.</li>
+     * </ul>
+     * The "20% of blocked damage returned as bonus cash next turn" (Reflect)
+     * is simplified to "immediately", documented in the class-level report
+     * to the same effect as the PLAN.md text already flags as simplifiable.
+     */
+    private double applyShieldMitigation(MatchPlayer target, double rawDamage, boolean isDirectHit,
+                                          List<Payloads.CashEarned> cashEarnedOut) {
+        String shieldId = target.player.activeShieldId;
+        if (shieldId == null) {
+            return rawDamage;
+        }
+        ShieldDef shield = ShieldDef.byId(shieldId);
+        if (shield == null) {
+            return rawDamage;
+        }
+
+        if (shield == ShieldDef.ABSORB) {
+            double mitigated = rawDamage * shield.damageMultiplier();
+            double absorbedThisHit = rawDamage - mitigated;
+            target.player.shieldAbsorbedSoFar += absorbedThisHit;
+            if (target.player.shieldAbsorbedSoFar >= ShieldDef.ABSORB_BREAK_THRESHOLD) {
+                target.player.activeShieldId = null;
+                target.player.shieldAbsorbedSoFar = 0;
+            }
+            return mitigated;
+        }
+
+        if (shield == ShieldDef.DEFLECT) {
+            if (isDirectHit) {
+                target.player.activeShieldId = null; // binary block, breaks after negating one direct hit
+                return 0.0;
+            }
+            return rawDamage * ShieldDef.DEFLECT_NEAR_MISS_MULTIPLIER;
+        }
+
+        if (shield == ShieldDef.REFLECT) {
+            double mitigated = rawDamage * shield.damageMultiplier();
+            double blocked = rawDamage - mitigated;
+            int cashBack = (int) Math.round(blocked * ShieldDef.REFLECT_CASHBACK_FRACTION);
+            if (cashBack > 0) {
+                target.player.cash += cashBack;
+                cashEarnedOut.add(new Payloads.CashEarned(target.player.playerId, cashBack));
+            }
+            return mitigated; // Reflect never breaks on its own (see method javadoc).
+        }
+
+        return rawDamage;
     }
 
     // =================================================================
@@ -739,6 +1021,55 @@ public final class Match {
     synchronized boolean isReady(String playerId) {
         MatchPlayer mp = players.get(playerId);
         return mp != null && mp.ready;
+    }
+
+    synchronized double healthOf(String playerId) {
+        MatchPlayer mp = players.get(playerId);
+        return mp == null ? -1 : mp.player.tank.health;
+    }
+
+    synchronized String activeShieldIdOf(String playerId) {
+        MatchPlayer mp = players.get(playerId);
+        return mp == null ? null : mp.player.activeShieldId;
+    }
+
+    synchronized double shieldAbsorbedSoFarOf(String playerId) {
+        MatchPlayer mp = players.get(playerId);
+        return mp == null ? -1 : mp.player.shieldAbsorbedSoFar;
+    }
+
+    synchronized Integer loadoutQtyOf(String playerId, String weaponId) {
+        MatchPlayer mp = players.get(playerId);
+        return mp == null ? null : mp.player.loadout.get(weaponId);
+    }
+
+    synchronized Terrain debugTerrain() {
+        return terrain;
+    }
+
+    /**
+     * Test-only hook: overrides the round's terrain with a caller-supplied one
+     * (e.g. flat terrain) so weapon-behavior tests can predict exact
+     * impact/apex/child-detonation points deterministically instead of
+     * fighting the real fractal terrain generator.
+     */
+    synchronized void debugSetTerrain(Terrain terrain) {
+        this.terrain = terrain;
+    }
+
+    /** Test-only hook: overrides the current turn's wind so shots land deterministically. */
+    synchronized void debugSetWind(int strength) {
+        this.windStrength = strength;
+        this.windDirectionSign = strength >= 0 ? 1 : -1;
+    }
+
+    /** Test-only hook: repositions a tank without going through terrain-derived spawn logic. */
+    synchronized void debugSetTankPosition(String playerId, double x, double y) {
+        MatchPlayer mp = players.get(playerId);
+        if (mp != null) {
+            mp.player.tank.x = x;
+            mp.player.tank.y = y;
+        }
     }
 
     /**

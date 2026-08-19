@@ -85,4 +85,60 @@ class ProjectileSimTest {
         assertTrue(result.resampledTrajectory.size() <= ProjectileSim.RESAMPLE_POINTS);
         assertTrue(result.resampledTrajectory.size() >= 2);
     }
+
+    // -----------------------------------------------------------------
+    // M3: weapon-behavior hooks (WeaponDef.Behavior)
+    // -----------------------------------------------------------------
+
+    @Test
+    void tunnelingContinuesPastFirstTerrainHitUpToPenetrationCap() {
+        Terrain standardTerrain = flatTerrain(500);
+        ProjectileSim.Result standard = ProjectileSim.simulate(200, 400, 30, 60, 0, standardTerrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+
+        Terrain tunnelTerrain = flatTerrain(500);
+        ProjectileSim.Result tunneling = ProjectileSim.simulate(200, 400, 30, 60, 0, tunnelTerrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.TUNNELING, 1.0, 1.0, false);
+
+        // Standard stops right at the terrain surface; tunneling keeps going
+        // "underground" up to TUNNELING_MAX_PENETRATION further.
+        assertTrue(tunneling.impactY > standard.impactY,
+                "tunneling should penetrate deeper: standard=" + standard.impactY + " tunneling=" + tunneling.impactY);
+        double penetration = tunneling.impactY - standard.impactY;
+        assertTrue(penetration > 15.0 && penetration <= ProjectileSim.TUNNELING_MAX_PENETRATION + 5.0,
+                "unexpected penetration depth: " + penetration);
+    }
+
+    @Test
+    void bouncingReflectsOffShallowAngleTerrainHit() {
+        Terrain terrain = flatTerrain(500);
+        // Shallow, low-angle, fast shot: should skip off the ground at least once
+        // instead of stopping at the first terrain hit.
+        ProjectileSim.Result result = ProjectileSim.simulate(50, 450, 15, 70, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
+
+        assertTrue(result.bounceCount >= 1, "expected at least one bounce, got " + result.bounceCount);
+        assertTrue(result.bounceCount <= ProjectileSim.BOUNCING_MAX_BOUNCES);
+
+        // A bouncing shot should travel farther than an equivalent standard shot
+        // fired at the same shallow angle, since it skips instead of stopping.
+        Terrain standardTerrain = flatTerrain(500);
+        ProjectileSim.Result standard = ProjectileSim.simulate(50, 450, 15, 70, 0, standardTerrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+        assertTrue(result.impactX > standard.impactX,
+                "bouncing shot should travel farther: bounced=" + result.impactX + " standard=" + standard.impactX);
+    }
+
+    @Test
+    void stopAtApexTerminatesWithNearZeroVerticalVelocity() {
+        Terrain terrain = flatTerrain(500);
+        ProjectileSim.Result apex = ProjectileSim.simulate(200, 400, 60, 55, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.STANDARD, 1.0, 1.0, true);
+
+        assertTrue(apex.stoppedAtApex, "expected the shot to stop at its apex");
+        assertTrue(apex.finalVy >= 0 && apex.finalVy < ProjectileSim.GRAVITY * ProjectileSim.DT,
+                "apex vy should be ~0, was " + apex.finalVy);
+        // Apex should be strictly above the launch height (smaller y == higher, since y grows downward).
+        assertTrue(apex.impactY < 400, "apex should be above launch point: " + apex.impactY);
+    }
 }

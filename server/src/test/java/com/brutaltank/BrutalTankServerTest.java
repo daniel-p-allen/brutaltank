@@ -213,6 +213,99 @@ class BrutalTankServerTest {
     }
 
     @Test
+    @Timeout(60)
+    void weaponRosterAndShieldWorkOverRealWebSockets() throws Exception {
+        // M3 live-WS coverage: exercises a couple of distinct weapons (not just
+        // basic_shell) and a shield activation through the real lobby -> match
+        // flow, over real WebSocket connections, per the M3 task spec.
+        TestClient a = new TestClient();
+        TestClient b = new TestClient();
+        try {
+            a.sendEnvelope("CreateMatch", "r1", java.util.Map.of("displayName", "Alice"));
+            a.awaitType("LobbyUpdate", 5000);
+            JsonNode created = a.awaitType("MatchCreated", 5000);
+            String matchId = created.get("matchId").asText();
+            String playerIdA = created.get("playerId").asText();
+
+            b.sendEnvelope("JoinMatch", "r2", java.util.Map.of("matchId", matchId, "displayName", "Bob"));
+            a.awaitType("LobbyUpdate", 5000);
+            b.awaitType("LobbyUpdate", 5000);
+            JsonNode joined = b.awaitType("MatchJoined", 5000);
+            String playerIdB = joined.get("playerId").asText();
+
+            a.sendEnvelope("SetReady", "r3", java.util.Map.of("ready", true));
+            a.awaitType("LobbyUpdate", 5000);
+            b.sendEnvelope("SetReady", "r4", java.util.Map.of("ready", true));
+
+            a.awaitType("MatchStarted", 5000);
+            b.awaitType("MatchStarted", 5000);
+            JsonNode syncA = a.awaitType("MatchStateSync", 5000);
+            b.awaitType("MatchStateSync", 5000);
+
+            // Confirm the full M3 starting loadout is present (not just basic_shell).
+            JsonNode playerAJson = null;
+            for (JsonNode p : syncA.get("players")) {
+                if (p.get("playerId").asText().equals(playerIdA)) {
+                    playerAJson = p;
+                }
+            }
+            assertNotNull(playerAJson);
+            JsonNode loadout = playerAJson.get("loadout");
+            assertEquals(-1, loadout.get("basic_shell").asInt());
+            assertEquals(5, loadout.get("baby_missile").asInt());
+            assertEquals(3, loadout.get("heavy_cannonball").asInt());
+            assertEquals(1, loadout.get("absorb_shield").asInt());
+            assertEquals(1, loadout.get("nuke").asInt());
+
+            JsonNode turnA = a.awaitType("TurnStarted", 5000);
+            b.awaitType("TurnStarted", 5000);
+            String activePlayerId = turnA.get("playerId").asText();
+            TestClient active = activePlayerId.equals(playerIdA) ? a : b;
+            TestClient inactive = activePlayerId.equals(playerIdA) ? b : a;
+
+            // --- Fire a non-basic weapon (baby_missile), a distinct weapon from M1/M2. ---
+            active.sendEnvelope("Fire", "rBaby", java.util.Map.of(
+                    "weaponId", "baby_missile", "angleDeg", 40, "power", 55));
+            JsonNode shot1a = a.awaitType("ShotResolved", 5000);
+            JsonNode shot1b = b.awaitType("ShotResolved", 5000);
+            assertEquals(shot1a, shot1b);
+            assertEquals("baby_missile", shot1a.get("weaponId").asText());
+
+            // Turn passes to the other player; fire heavy_cannonball, another
+            // distinct behavior/stats weapon.
+            a.awaitType("TurnStarted", 5000);
+            b.awaitType("TurnStarted", 5000);
+            inactive.sendEnvelope("Fire", "rHeavy", java.util.Map.of(
+                    "weaponId", "heavy_cannonball", "angleDeg", 35, "power", 60));
+            JsonNode shot2a = a.awaitType("ShotResolved", 5000);
+            JsonNode shot2b = b.awaitType("ShotResolved", 5000);
+            assertEquals(shot2a, shot2b);
+            assertEquals("heavy_cannonball", shot2a.get("weaponId").asText());
+
+            // --- Shield activation: whoever's turn it is now activates absorb_shield. ---
+            a.awaitType("TurnStarted", 5000);
+            JsonNode turnC = b.awaitType("TurnStarted", 5000);
+            String shieldTurnPlayerId = turnC.get("playerId").asText();
+            TestClient shieldActivator = shieldTurnPlayerId.equals(playerIdA) ? a : b;
+
+            shieldActivator.sendEnvelope("Fire", "rShield", java.util.Map.of(
+                    "weaponId", "absorb_shield", "angleDeg", 0, "power", 0));
+            JsonNode shieldShotA = a.awaitType("ShotResolved", 5000);
+            JsonNode shieldShotB = b.awaitType("ShotResolved", 5000);
+            assertEquals(shieldShotA, shieldShotB);
+            assertEquals("absorb_shield", shieldShotA.get("weaponId").asText());
+            // Shield-activation encoding (documented judgment call): zero-length
+            // trajectory/no-op terrainDelta, no damage/cash.
+            assertEquals(1, shieldShotA.get("trajectory").size());
+            assertEquals(0, shieldShotA.get("damageEvents").size());
+            assertEquals(0, shieldShotA.get("cashEarned").size());
+        } finally {
+            a.close();
+            b.close();
+        }
+    }
+
+    @Test
     @Timeout(15)
     void joiningNonexistentMatchGetsErrorMsg() throws Exception {
         TestClient client = new TestClient();

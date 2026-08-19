@@ -6,9 +6,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Server-authoritative kinematic simulation for the Basic Shell (M1 scope;
- * the other 9 weapons' behavior hooks — MIRV split, bounce, tunneling — are
- * later milestones). Fixed-timestep integration per PLAN.md 4.2.
+ * Server-authoritative kinematic simulation for all weapon behaviors
+ * (PLAN.md 4.2). Fixed-timestep integration, extended for M3's
+ * behavior-specific hooks:
+ * <ul>
+ *   <li>{@link WeaponDef.Behavior#TUNNELING}: doesn't terminate on the first
+ *       terrain hit — keeps integrating "underground" until cumulative
+ *       penetration depth exceeds {@link #TUNNELING_MAX_PENETRATION}.</li>
+ *   <li>{@link WeaponDef.Behavior#BOUNCING}: reflects {@code vy} (×0.6) on a
+ *       shallow-angle terrain hit (&lt;35&deg; from horizontal), up to
+ *       {@link #BOUNCING_MAX_BOUNCES} times, then detonates on the next
+ *       hit.</li>
+ *   <li>Apex detection ({@code stopAtApex}): used by MIRV — {@code Match}
+ *       calls {@link #simulate} once with {@code stopAtApex=true} to find the
+ *       split point, then simulates each child from there. Apex is the step
+ *       where {@code vy} transitions from negative to non-negative (this
+ *       codebase's convention: {@code vy} negative == moving up, since
+ *       gravity increases {@code vy} over time and {@code y} grows
+ *       downward).</li>
+ * </ul>
  */
 public final class ProjectileSim {
 
@@ -18,6 +34,11 @@ public final class ProjectileSim {
     public static final double POWER_SCALE = 4.0;
     public static final double TANK_HITBOX_RADIUS = 14.0;
     public static final int RESAMPLE_POINTS = 36;
+
+    public static final double TUNNELING_MAX_PENETRATION = 40.0;
+    public static final int BOUNCING_MAX_BOUNCES = 3;
+    public static final double BOUNCING_ENERGY_RETENTION = 0.6;
+    public static final double BOUNCING_SHALLOW_ANGLE_DEG = 35.0;
 
     private static final int MAX_STEPS = 20 * 60; // 20s safety cap
 
@@ -35,35 +56,81 @@ public final class ProjectileSim {
         public final double impactX;
         public final double impactY;
         public final String hitPlayerId; // null if terrain/out-of-bounds hit
+        /** True when this result stopped at the trajectory apex rather than a real impact (MIRV). */
+        public final boolean stoppedAtApex;
+        /** Velocity at the terminal point — MIRV children re-launch from here. */
+        public final double finalVx;
+        public final double finalVy;
+        /** Number of terrain bounces this shot performed (BOUNCING behavior; 0 otherwise). */
+        public final int bounceCount;
 
         Result(List<double[]> rawPath, List<double[]> resampledTrajectory,
-               double impactX, double impactY, String hitPlayerId) {
+               double impactX, double impactY, String hitPlayerId,
+               boolean stoppedAtApex, double finalVx, double finalVy, int bounceCount) {
             this.rawPath = rawPath;
             this.resampledTrajectory = resampledTrajectory;
             this.impactX = impactX;
             this.impactY = impactY;
             this.hitPlayerId = hitPlayerId;
+            this.stoppedAtApex = stoppedAtApex;
+            this.finalVx = finalVx;
+            this.finalVy = finalVy;
+            this.bounceCount = bounceCount;
         }
     }
 
+    /** Original M1/M2 entry point: plain ballistic arc, no weapon-specific behavior. */
     public static Result simulate(double startX, double startY, double angleDeg, double power,
                                    int windStrength, Terrain terrain, List<TankTarget> targets) {
+        return simulate(startX, startY, angleDeg, power, windStrength, terrain, targets,
+                WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+    }
+
+    /**
+     * Full entry point used by weapon-specific dispatch in {@code Match}.
+     *
+     * @param behavior              drives TUNNELING/BOUNCING in-flight handling; MIRV/CLUSTER/DIGGER
+     *                              are resolved by the caller around a STANDARD-shaped simulation
+     *                              (see class javadoc and Match.resolveShot).
+     * @param powerScaleMultiplier  per-weapon launch-velocity multiplier (e.g. baby_missile ~1.15).
+     * @param gravityMultiplier     per-weapon gravity multiplier (e.g. heavy_cannonball ~1.1).
+     * @param stopAtApex            when true, terminate at the trajectory apex instead of on impact.
+     */
+    public static Result simulate(double startX, double startY, double angleDeg, double power,
+                                   int windStrength, Terrain terrain, List<TankTarget> targets,
+                                   WeaponDef.Behavior behavior, double powerScaleMultiplier,
+                                   double gravityMultiplier, boolean stopAtApex) {
         double angleRad = Math.toRadians(angleDeg);
-        double vx = power * Math.cos(angleRad) * POWER_SCALE;
-        double vy = -power * Math.sin(angleRad) * POWER_SCALE;
+        double vx = power * Math.cos(angleRad) * POWER_SCALE * powerScaleMultiplier;
+        double vy = -power * Math.sin(angleRad) * POWER_SCALE * powerScaleMultiplier;
         double x = startX;
         double y = startY;
         double windAccel = windStrength * WIND_ACCEL_PER_STRENGTH;
+        double gravity = GRAVITY * gravityMultiplier;
 
         List<double[]> path = new ArrayList<>();
         path.add(new double[] {x, y});
 
         String hitPlayerId = null;
         boolean terminated = false;
+        boolean apexHit = false;
+        boolean tunneling = behavior == WeaponDef.Behavior.TUNNELING;
+        boolean bouncing = behavior == WeaponDef.Behavior.BOUNCING;
+        boolean inPenetration = false;
+        double penetrationEntryY = 0;
+        int bounceCount = 0;
 
         for (int step = 0; step < MAX_STEPS; step++) {
+            double vyBefore = vy;
             vx += windAccel * DT;
-            vy += GRAVITY * DT;
+            vy += gravity * DT;
+
+            if (stopAtApex && vyBefore < 0 && vy >= 0) {
+                terminated = true;
+                apexHit = true;
+                break;
+            }
+
             x += vx * DT;
             y += vy * DT;
             path.add(new double[] {x, y});
@@ -72,6 +139,16 @@ public final class ProjectileSim {
             if (x < 0 || x >= terrain.width() || y > Terrain.FLOOR + 50) {
                 terminated = true;
                 break;
+            }
+
+            if (inPenetration) {
+                // Tunneling: keep integrating "underground" (no further terrain/tank
+                // checks) until cumulative penetration depth passes the cap.
+                if (Math.abs(y - penetrationEntryY) >= TUNNELING_MAX_PENETRATION) {
+                    terminated = true;
+                    break;
+                }
+                continue;
             }
 
             // Tank hit check.
@@ -91,18 +168,28 @@ public final class ProjectileSim {
             // Terrain hit check.
             double groundY = terrain.heightAt((int) Math.round(x));
             if (y >= groundY) {
+                if (tunneling) {
+                    inPenetration = true;
+                    penetrationEntryY = y;
+                    continue;
+                }
+                if (bouncing && bounceCount < BOUNCING_MAX_BOUNCES) {
+                    double incidenceDeg = Math.toDegrees(Math.atan2(Math.abs(vy), Math.abs(vx) + 1e-9));
+                    if (incidenceDeg < BOUNCING_SHALLOW_ANGLE_DEG) {
+                        bounceCount++;
+                        vy = -vy * BOUNCING_ENERGY_RETENTION;
+                        y = groundY - 1; // nudge back above ground to avoid immediate re-trigger
+                        continue;
+                    }
+                }
                 terminated = true;
                 break;
             }
         }
 
-        if (!terminated) {
-            // Safety-cap fallback: treat last point as impact.
-        }
-
         double[] last = path.get(path.size() - 1);
         List<double[]> resampled = resample(path, RESAMPLE_POINTS);
-        return new Result(path, resampled, last[0], last[1], hitPlayerId);
+        return new Result(path, resampled, last[0], last[1], hitPlayerId, apexHit, vx, vy, bounceCount);
     }
 
     private static List<double[]> resample(List<double[]> path, int targetCount) {

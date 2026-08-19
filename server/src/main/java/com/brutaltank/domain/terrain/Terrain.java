@@ -38,6 +38,23 @@ public final class Terrain {
         return heights.clone();
     }
 
+    /**
+     * Returns a defensive copy of {@code heights[startX..endX]} inclusive,
+     * clamped to valid column bounds. Used by {@code Match} to build one
+     * merged {@code terrainDelta} spanning several detonation points from a
+     * single multi-impact weapon (MIRV/cluster bomb) in one {@code ShotResolved}.
+     */
+    public int[] heightsInRange(int startX, int endX) {
+        int s = Math.max(0, startX);
+        int e = Math.min(heights.length - 1, endX);
+        if (e < s) {
+            return new int[0];
+        }
+        int[] out = new int[e - s + 1];
+        System.arraycopy(heights, s, out, 0, out.length);
+        return out;
+    }
+
     /** Direct (non-defensive) access for internal simulation code. */
     int[] rawHeights() {
         return heights;
@@ -51,10 +68,19 @@ public final class Terrain {
      * directly.
      */
     public CraterResult applyCrater(int centerX, double radius) {
+        return applyCrater(centerX, radius, 1.0);
+    }
+
+    /**
+     * Overload accepting a crater depth multiplier (M3: Digger's ×1.8 crater
+     * depth, PLAN.md 4.4). {@code depthMultiplier} of 1.0 is identical to the
+     * base {@link #applyCrater(int, double)} behavior.
+     */
+    public CraterResult applyCrater(int centerX, double radius, double depthMultiplier) {
         int r = (int) Math.ceil(radius);
         int startX = Math.max(0, centerX - r);
         int endX = Math.min(heights.length - 1, centerX + r);
-        double maxDepth = radius * 0.8;
+        double maxDepth = radius * 0.8 * depthMultiplier;
 
         for (int x = startX; x <= endX; x++) {
             double dist = Math.abs(x - centerX);
