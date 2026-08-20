@@ -252,3 +252,54 @@ export type RoundEndedEnvelope = Envelope<RoundEndedPayload>;
 export type MatchEndedEnvelope = Envelope<MatchEndedPayload>;
 export type PlayerDisconnectedEnvelope = Envelope<PlayerDisconnectedPayload>;
 export type PlayerReconnectedEnvelope = Envelope<PlayerReconnectedPayload>;
+
+// ---------------------------------------------------------------------------
+// Shop messages (protocol.md section 5, M4)
+// ---------------------------------------------------------------------------
+
+export interface ShopPurchasePayload {
+	itemId: string;
+	itemType: 'WEAPON' | 'SHIELD';
+	quantity: number;
+}
+
+/**
+ * One priced item in the shop's price list. `stock` (M4 addition beyond the
+ * item's static price) is how many units are left to buy across the whole
+ * match for this shop phase, not per-player — see ShopUpdatePayload's
+ * `stockRemaining` for how it updates live as anyone buys.
+ */
+export interface PriceListEntry {
+	itemId: string;
+	itemType: 'WEAPON' | 'SHIELD';
+	price: number;
+	stock: number;
+}
+
+export interface ShopOpenedPayload {
+	timeoutSec: number;
+	priceList: PriceListEntry[];
+}
+
+export interface ShopUpdatePayload {
+	playerId: string;
+	cash: number;
+	loadout: Record<string, number>;
+	/** The full shared stock pool after this purchase, keyed by itemId — broadcast to everyone, not just the buyer. */
+	stockRemaining: Record<string, number>;
+}
+
+export type ShopPurchaseEnvelope = Envelope<ShopPurchasePayload>;
+export type ShopOpenedEnvelope = Envelope<ShopOpenedPayload>;
+export type ShopUpdateEnvelope = Envelope<ShopUpdatePayload>;
+
+// ---------------------------------------------------------------------------
+// Error / connection messages (protocol.md section 6)
+// ---------------------------------------------------------------------------
+
+export interface ErrorMsgPayload {
+	code: string;
+	message: string;
+}
+
+export type ErrorMsgEnvelope = Envelope<ErrorMsgPayload>;

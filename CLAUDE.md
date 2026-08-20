@@ -7,10 +7,7 @@
   roadmap (M0-M6), testing approach.
 - `shared/protocol.md` — the canonical, hand-maintained WebSocket message
   schema. Source of truth for every message shape; both `server/` and
-  `client/` implement it by hand (no codegen). Check this before assuming a
-  message type/field doesn't exist or isn't planned — e.g. the M4 shop
-  messages (`ShopPurchase`/`ShopOpened`/`ShopUpdate`) are already fully
-  spec'd here even though nothing implements them yet.
+  `client/` implement it by hand (no codegen).
 - `docs/architecture.md` — a living copy of `PLAN.md`; keep both in sync if
   editing either.
 - `README.md` — quickstart/dev workflow, also points at the two files above.
@@ -30,11 +27,15 @@ bottom, terrain collapse + tank fall damage, per-weapon terrain signatures,
 a MIRV trajectory bug, wind tuning/indicator). See `PLAN.md` section 5 for
 the milestone definitions.
 
-**M4 (shop/economy) is next**: fully spec'd in `shared/protocol.md` section
-5, not yet implemented anywhere (no `Shop*` classes server-side, no shop UI
-client-side). Cash/damage bookkeeping it depends on already works
-(`Match.java`: starting cash, cash-per-damage, elimination/survival
-bonuses, per-player loadout quantities) — there's just nowhere to spend it
-yet. `RoundEnded` currently skips straight to the next round with no shop
-pause (`protocol.md` section 4 calls this out explicitly as a temporary M2
-simplification, not a protocol change).
+**M4 (shop/economy) is in progress.** Server-side is done and tested
+(`Match.openShop`/`purchase`, `BrutalTankServer.handleShopPurchase`,
+`ShopTest.java`): `RoundEnded` now opens a timed shop phase before the next
+round (unless the match just ended) instead of transitioning immediately.
+Includes a shared, match-wide **stock** limit per item (not in the original
+protocol.md table — see `WeaponDef.shopStock`/`ShieldDef.shopStock`, added
+per user feedback: "the shop should not be unlimited in stock... this plays
+into tactics"). **Client-side shop UI is not built yet** — that's the
+remaining M4 work (`ShopOverlay.svelte` + weapon/shield cards under
+`client/src/lib/components/shop/`, per `PLAN.md` section 3.1's component
+list, wired to the now-implemented `ShopOpened`/`ShopUpdate`/`ShopPurchase`
+messages).

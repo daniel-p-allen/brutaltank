@@ -20,7 +20,8 @@ public record WeaponDef(
         double powerScaleMultiplier,
         double gravityMultiplier,
         double craterDepthMultiplier,
-        double bombletBlastRadius) {
+        double bombletBlastRadius,
+        int shopStock) {
 
     /**
      * Behavior tag driving {@link ProjectileSim}/{@link com.brutaltank.match.Match}
@@ -44,26 +45,34 @@ public record WeaponDef(
     /** Convenience constructor for weapons that don't need the optional modifiers. */
     public WeaponDef(String weaponId, Behavior behavior, double blastRadius, double centerDamage,
                       int price, int defaultQty) {
-        this(weaponId, behavior, blastRadius, centerDamage, price, defaultQty, 1.0, 1.0, 1.0, 0.0);
+        this(weaponId, behavior, blastRadius, centerDamage, price, defaultQty, 1.0, 1.0, 1.0, 0.0, 8);
     }
 
     // -----------------------------------------------------------------
     // PLAN.md 4.4 roster
     // -----------------------------------------------------------------
 
+    // basic_shell is never in the shop (defaultQty -1 == unlimited already),
+    // so its shopStock is irrelevant; every other weapon's shopStock is a
+    // M4 addition (not in PLAN.md's original table) — a shared pool across
+    // the whole match's shop phase (not per-player), replenished fresh each
+    // round, sized roughly in inverse proportion to power/price so the
+    // rarer/stronger weapons create real "buy it now or lose it" tactics.
     public static final WeaponDef BASIC_SHELL =
-            new WeaponDef("basic_shell", Behavior.STANDARD, 30.0, 25.0, 0, -1);
+            new WeaponDef("basic_shell", Behavior.STANDARD, 30.0, 25.0, 0, -1,
+                    1.0, 1.0, 1.0, 0.0, 0);
 
     public static final WeaponDef BABY_MISSILE =
             new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 18.0, 0, 5,
-                    1.15, 1.0, 1.0, 0.0);
+                    1.15, 1.0, 1.0, 0.0, 20);
 
     public static final WeaponDef HEAVY_CANNONBALL =
             new WeaponDef("heavy_cannonball", Behavior.STANDARD, 45.0, 40.0, 150, 3,
-                    0.85, 1.1, 1.3, 0.0);
+                    0.85, 1.1, 1.3, 0.0, 10);
 
     public static final WeaponDef MIRV =
-            new WeaponDef("mirv", Behavior.MIRV, 25.0, 15.0, 300, 2);
+            new WeaponDef("mirv", Behavior.MIRV, 25.0, 15.0, 300, 2,
+                    1.0, 1.0, 1.0, 0.0, 6);
 
     // Terrain signature (per Scorched Earth's manual: napalm "splashes...and
     // bursts into hot flame", it doesn't excavate) is a wide, shallow burn
@@ -71,17 +80,19 @@ public record WeaponDef(
     // already-wide blastRadius.
     public static final WeaponDef NAPALM =
             new WeaponDef("napalm", Behavior.STANDARD, 50.0, 20.0, 250, 2,
-                    1.0, 1.0, 0.2, 0.0);
+                    1.0, 1.0, 0.2, 0.0, 8);
 
     public static final WeaponDef TUNNELING_SHOT =
-            new WeaponDef("tunneling_shot", Behavior.TUNNELING, 25.0, 30.0, 200, 2);
+            new WeaponDef("tunneling_shot", Behavior.TUNNELING, 25.0, 30.0, 200, 2,
+                    1.0, 1.0, 1.0, 0.0, 8);
 
     public static final WeaponDef BOUNCING_BETTY =
-            new WeaponDef("bouncing_betty", Behavior.BOUNCING, 30.0, 25.0, 220, 2);
+            new WeaponDef("bouncing_betty", Behavior.BOUNCING, 30.0, 25.0, 220, 2,
+                    1.0, 1.0, 1.0, 0.0, 8);
 
     public static final WeaponDef CLUSTER_BOMB =
             new WeaponDef("cluster_bomb", Behavior.CLUSTER, 20.0, 20.0, 280, 2,
-                    1.0, 1.0, 1.0, 12.0);
+                    1.0, 1.0, 1.0, 12.0, 6);
 
     // Narrow blastRadius + a large depth multiplier is enough on its own
     // (via applyCrater's quadratic falloff) to read as a narrow deep shaft
@@ -89,14 +100,14 @@ public record WeaponDef(
     // Sandhog family tunnels straight down.
     public static final WeaponDef DIGGER =
             new WeaponDef("digger", Behavior.DIGGER, 20.0, 10.0, 120, 3,
-                    1.0, 1.0, 3.0, 0.0);
+                    1.0, 1.0, 3.0, 0.0, 10);
 
     // Biggest weapon gets the most dramatic terrain: with Terrain.FLOOR's
     // extended headroom, a center hit now plunges close to the true bottom
-    // of the screen.
+    // of the screen. Also the scarcest shop item, by design.
     public static final WeaponDef NUKE =
             new WeaponDef("nuke", Behavior.STANDARD, 90.0, 70.0, 600, 1,
-                    1.0, 1.0, 2.3, 0.0);
+                    1.0, 1.0, 2.3, 0.0, 3);
 
     private static final Map<String, WeaponDef> WEAPONS_BY_ID = buildWeaponIndex();
 

@@ -320,7 +320,7 @@ Weapon-specific behavior (MIRV children, bounces, tunneling) is still expressed 
 
 Followed by `ShopOpened` (shop phase) and eventually a new `MatchStateSync` for the next round, or `MatchEnded` if `maxRounds` reached.
 
-**M2 note**: the shop phase (`ShopOpened`/`ShopPurchase`/`ShopUpdate`, section 5) is out of scope until M4. Until then, `RoundEnded` is immediately followed by the next round's fresh `MatchStateSync`/`TurnStarted` (or `MatchEnded`) with no shop pause in between — this is a temporary milestone simplification, not a protocol change.
+**M2 note (historical)**: through M3, the shop phase (`ShopOpened`/`ShopPurchase`/`ShopUpdate`, section 5) was out of scope, and `RoundEnded` went straight to the next round's fresh `MatchStateSync`/`TurnStarted` with no shop pause. **As of M4**, `RoundEnded` is followed by `ShopOpened` (unless `maxRounds` was just reached, in which case `MatchEnded` follows directly instead) — see section 5.
 
 #### `MatchEnded`
 
@@ -334,7 +334,7 @@ Followed by `ShopOpened` (shop phase) and eventually a new `MatchStateSync` for 
 
 ## 5. Shop messages
 
-Cover the between-round economy phase (`Shop`/`PriceTable`, plan sections 2.3/4.5).
+Cover the between-round economy phase (`Shop`/`PriceTable`, plan sections 2.3/4.5). **Implemented as of M4** (server: `Match.openShop`/`Match.purchase`; client: see the shop UI components under `client/src/lib/components/shop/`).
 
 ### Client → Server
 
@@ -350,7 +350,7 @@ Cover the between-round economy phase (`Shop`/`PriceTable`, plan sections 2.3/4.
 | `itemType` | string | yes | `"WEAPON"` or `"SHIELD"`. |
 | `quantity` | integer | yes | Number of units to buy (shields are typically quantity 1). |
 
-Only accepted while `status == SHOP`; validated server-side against the player's current cash. Insufficient funds or an out-of-phase purchase gets an `ErrorMsg`/rejection rather than silently failing.
+Only accepted while `status == SHOP`; validated server-side against the player's current cash **and the shared stock pool** (see `ShopOpened.priceList[].stock` below). Insufficient funds, insufficient stock, or an out-of-phase purchase gets an `ErrorMsg`/rejection rather than silently failing — rejection codes: `NOT_SHOP_PHASE`, `INSUFFICIENT_CASH`, `OUT_OF_STOCK`, `INVALID_ITEM`, `INVALID_QUANTITY`.
 
 ### Server → Client
 
@@ -363,8 +363,8 @@ Only accepted while `status == SHOP`; validated server-side against the player's
   "payload": {
     "timeoutSec": 30,
     "priceList": [
-      { "itemId": "heavy_cannonball", "itemType": "WEAPON", "price": 150 },
-      { "itemId": "absorb_shield", "itemType": "SHIELD", "price": 200 }
+      { "itemId": "heavy_cannonball", "itemType": "WEAPON", "price": 150, "stock": 10 },
+      { "itemId": "absorb_shield", "itemType": "SHIELD", "price": 200, "stock": 5 }
     ]
   }
 }
@@ -372,13 +372,15 @@ Only accepted while `status == SHOP`; validated server-side against the player's
 
 Broadcast at the start of the shop phase. `timeoutSec` is server-enforced (default 30s); when it elapses the server transitions to the next round's `TURN_START` regardless of purchases made.
 
+`priceList[].stock` (M4 addition beyond the item's static price) is how many units are left to buy **across the whole match** for this shop phase — not per-player. It's a shared pool: two different players' purchases draw from the same count, so it's possible to race someone else for the last unit of a scarce item (e.g. Nuke, `shopStock: 3`). Stock is replenished fresh every time a new shop phase opens. `basic_shell` never appears in `priceList` since it's already unlimited (`defaultQty: -1` in `MatchStateSync`).
+
 #### `ShopUpdate`
 
 ```json
-{ "type": "ShopUpdate", "v": 1, "requestId": "r20", "payload": { "playerId": "p-1", "cash": 350, "loadout": { "basic_shell": -1, "heavy_cannonball": 2 } } }
+{ "type": "ShopUpdate", "v": 1, "requestId": "r20", "payload": { "playerId": "p-1", "cash": 350, "loadout": { "basic_shell": -1, "heavy_cannonball": 2 }, "stockRemaining": { "heavy_cannonball": 8, "absorb_shield": 5 } } }
 ```
 
-Broadcast (or sent to the purchaser, at minimum) after a successful `ShopPurchase`, reflecting the player's updated cash and loadout. Echoes the purchaser's `requestId` when sent to them directly.
+Broadcast to **every** connected player (not just the purchaser) after a successful `ShopPurchase` — `cash`/`loadout` describe the purchaser only, but `stockRemaining` (the full updated stock map) is what lets every other client's price list reflect the shared pool shrinking in real time, which is what makes stock scarcity an actual multiplayer tactic rather than a per-player detail. Echoes the purchaser's `requestId` when sent to them directly.
 
 ---
 

@@ -26,7 +26,8 @@ import java.util.logging.Logger;
  * {@code /ws}, and routes envelope-wrapped messages (see shared/protocol.md)
  * to the lobby/match layer. Handles {@code Ping}->{@code Pong} (M0), the
  * full lobby flow (M2: CreateMatch/JoinMatch/SetReady/Rejoin/LeaveMatch), and
- * turn-gated {@code Fire}->{@code ShotResolved}/{@code FireRejected}.
+ * turn-gated {@code Fire}->{@code ShotResolved}/{@code FireRejected}. M4 adds
+ * {@code ShopPurchase}->{@code ShopUpdate}/{@code ErrorMsg}.
  */
 public final class BrutalTankServer {
 
@@ -133,6 +134,7 @@ public final class BrutalTankServer {
                         mapper.treeToValue(payloadNode, Payloads.Rejoin.class));
                 case "LeaveMatch" -> lobbyManager.handleLeaveMatch(session);
                 case "Fire" -> handleFire(session, sink, envelope, payloadNode);
+                case "ShopPurchase" -> handleShopPurchase(session, sink, envelope, payloadNode);
                 default -> LOG.fine("Ignoring unhandled message type: " + envelope.type);
             }
         } catch (Exception e) {
@@ -167,6 +169,42 @@ public final class BrutalTankServer {
         }
         // On success, Match.fire() has already broadcast ShotResolved (and any
         // round/match transition messages) to every connected player itself.
+    }
+
+    private void handleShopPurchase(PlayerSession session, MessageSink sink, Envelope envelope, JsonNode payloadNode) throws Exception {
+        Payloads.ShopPurchase purchase = mapper.treeToValue(payloadNode, Payloads.ShopPurchase.class);
+
+        if (session.currentMatchId == null || session.playerId == null) {
+            Envelopes.send(sink, mapper, "ErrorMsg", envelope.requestId,
+                    new Payloads.ErrorMsg("NOT_SHOP_PHASE", "You're not in a match."));
+            return;
+        }
+        Match match = matchRegistry.get(session.currentMatchId);
+        if (match == null) {
+            Envelopes.send(sink, mapper, "ErrorMsg", envelope.requestId,
+                    new Payloads.ErrorMsg("NOT_SHOP_PHASE", "You're not in a match."));
+            return;
+        }
+
+        Match.PurchaseOutcome outcome = match.purchase(
+                session.playerId, purchase.itemId, purchase.itemType, purchase.quantity);
+        if (!outcome.accepted()) {
+            Envelopes.send(sink, mapper, "ErrorMsg", envelope.requestId,
+                    new Payloads.ErrorMsg(outcome.rejectReason(), shopRejectionMessage(outcome.rejectReason())));
+        }
+        // On success, Match.purchase() has already broadcast ShopUpdate to
+        // every connected player itself (see handleFire's identical note).
+    }
+
+    private static String shopRejectionMessage(String reason) {
+        return switch (reason) {
+            case "NOT_SHOP_PHASE" -> "The shop isn't open right now.";
+            case "INSUFFICIENT_CASH" -> "You can't afford that.";
+            case "OUT_OF_STOCK" -> "Not enough left in stock.";
+            case "INVALID_ITEM" -> "That item isn't available in the shop.";
+            case "INVALID_QUANTITY" -> "Enter a valid quantity.";
+            default -> "Purchase failed.";
+        };
     }
 
     public void start() {

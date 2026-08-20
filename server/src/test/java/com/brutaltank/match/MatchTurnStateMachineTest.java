@@ -136,9 +136,10 @@ class MatchTurnStateMachineTest {
 
     @Test
     @Timeout(10)
-    void roundEndsWhenAtMostOneTankAliveAndRespawnsForNextRound() {
+    void roundEndsWhenAtMostOneTankAliveThenOpensShopThenRespawnsForNextRound() {
         Match match = newMatch("m-turn-4", 4, 8);
         match.setTurnTimeoutMs(30_000);
+        match.setShopTimeoutMs(100); // M4: short so the test doesn't wait the real 30s shop phase
         Joined p1 = join(match, "P1");
         Joined p2 = join(match, "P2");
         Joined p3 = join(match, "P3");
@@ -159,10 +160,17 @@ class MatchTurnStateMachineTest {
         assertNotNull(roundEnded);
         assertEquals(p1.playerId(), roundEnded.get("winnerPlayerId").asText());
 
-        // Round < maxRounds (4): match immediately regenerates terrain and respawns
-        // all non-departed players alive at full health for round 2 (M2 simplification,
-        // no shop pause per shared/protocol.md's M2 note).
-        assertEquals(2, match.roundNumber());
+        // Round < maxRounds (4): RoundEnded is immediately followed by a shop
+        // phase (M4), not an immediate respawn — protocol.md's "no shop pause"
+        // note was an M2 simplification, since superseded.
+        assertEquals(Match.Status.SHOP, match.status());
+        assertEquals(1, match.roundNumber(), "round number shouldn't advance until the shop phase closes");
+        assertNotNull(p1.sink().lastPayloadOfType("ShopOpened"));
+
+        // Once the (short, test-overridden) shop timeout elapses, the match
+        // regenerates terrain and respawns all non-departed players alive at
+        // full health for round 2.
+        waitUntil(() -> match.roundNumber() >= 2, 5_000);
         assertTrue(match.isAlive(p2.playerId()), "p2 should be respawned alive for round 2");
         assertTrue(match.isAlive(p3.playerId()), "p3 should be respawned alive for round 2");
         assertEquals(0, p1.sink().countOfType("MatchEnded"));
@@ -193,6 +201,7 @@ class MatchTurnStateMachineTest {
     void sixtyTurnSafetyCapEndsRoundWithoutElimination() {
         Match match = newMatch("m-turn-6", 4, 8);
         match.setTurnTimeoutMs(15); // short: let the real auto-skip timer drive all 60 turns
+        match.setShopTimeoutMs(100); // M4: short so round 2 isn't blocked on the real 30s shop phase
         Joined p1 = join(match, "P1");
         Joined p2 = join(match, "P2");
         match.setReady(p1.playerId(), true);

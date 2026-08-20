@@ -318,4 +318,115 @@ describe('matchStore', () => {
 		);
 		expect(get(matchStore).disconnectedPlayerIds).toEqual([]);
 	});
+
+	it('opens the shop with a fresh price list/stock snapshot on ShopOpened', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ShopOpened',
+				v: 1,
+				payload: {
+					timeoutSec: 30,
+					priceList: [
+						{ itemId: 'heavy_cannonball', itemType: 'WEAPON', price: 150, stock: 10 },
+						{ itemId: 'absorb_shield', itemType: 'SHIELD', price: 200, stock: 5 }
+					]
+				}
+			})
+		);
+
+		const state = get(matchStore);
+		expect(state.status).toBe('SHOP');
+		expect(state.shop?.timeoutSec).toBe(30);
+		expect(state.shop?.priceList).toHaveLength(2);
+		expect(state.shop?.stockRemaining).toEqual({ heavy_cannonball: 10, absorb_shield: 5 });
+	});
+
+	it('patches the purchaser cash/loadout and the shared stock pool on ShopUpdate', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ShopOpened',
+				v: 1,
+				payload: {
+					timeoutSec: 30,
+					priceList: [{ itemId: 'heavy_cannonball', itemType: 'WEAPON', price: 150, stock: 10 }]
+				}
+			})
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ShopUpdate',
+				v: 1,
+				payload: {
+					playerId: 'p-1',
+					cash: 350,
+					loadout: { basic_shell: -1, heavy_cannonball: 2 },
+					stockRemaining: { heavy_cannonball: 8 }
+				}
+			})
+		);
+
+		const state = get(matchStore);
+		const p1 = state.players.find((p) => p.playerId === 'p-1')!;
+		expect(p1.cash).toBe(350);
+		expect(p1.loadout).toEqual({ basic_shell: -1, heavy_cannonball: 2 });
+		expect(state.shop?.stockRemaining).toEqual({ heavy_cannonball: 8 });
+
+		// A different player's cash/loadout must be untouched.
+		const p2 = state.players.find((p) => p.playerId === 'p-2')!;
+		expect(p2.cash).toBe(500);
+	});
+
+	it('records ErrorMsg codes (e.g. a rejected ShopPurchase) as shopErrorReason', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ErrorMsg',
+				v: 1,
+				payload: { code: 'INSUFFICIENT_CASH', message: "You can't afford that." }
+			})
+		);
+		expect(get(matchStore).shopErrorReason).toBe('INSUFFICIENT_CASH');
+	});
+
+	it('clears the shop on MatchEnded', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ShopOpened',
+				v: 1,
+				payload: { timeoutSec: 30, priceList: [] }
+			})
+		);
+		expect(get(matchStore).shop).not.toBeNull();
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchEnded', v: 1, payload: { finalStandings: [] } })
+		);
+		expect(get(matchStore).shop).toBeNull();
+	});
 });

@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class Match {
 
-    public enum Status { WAITING, IN_PROGRESS, COMPLETE }
+    public enum Status { WAITING, IN_PROGRESS, SHOP, COMPLETE }
 
     private static final int STARTING_HEALTH = 100;
     private static final int STARTING_CASH = 500;
@@ -53,6 +53,8 @@ public final class Match {
     private static final int ELIMINATION_BONUS = 100;
     static final long DEFAULT_TURN_TIMEOUT_MS = 30_000;
     static final long DEFAULT_RECONNECT_GRACE_MS = 120_000;
+    // M4 (PLAN.md 4.5: "Shop phase duration: 30s, server-enforced").
+    static final long DEFAULT_SHOP_TIMEOUT_MS = 30_000;
     private static final String[] COLORS = {
             "#e33", "#33e", "#3e3", "#ee3", "#e3e", "#3ee", "#f80", "#a3f"
     };
@@ -74,10 +76,15 @@ public final class Match {
     private int windDirectionSign = 1;
     private int turnsThisRound;
     private int turnToken;
+    private int shopToken;
+    // Shared across all players for the current shop phase (M4: shop stock
+    // is a match-wide pool, not per-player — see WeaponDef/ShieldDef.shopStock).
+    private final Map<String, Integer> shopStockRemaining = new LinkedHashMap<>();
     private ScheduledFuture<?> pendingTimeout;
 
     private volatile long turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
     private volatile long reconnectGraceMs = DEFAULT_RECONNECT_GRACE_MS;
+    private volatile long shopTimeoutMs = DEFAULT_SHOP_TIMEOUT_MS;
 
     public Match(String matchId, ObjectMapper mapper, MatchConfig config, ScheduledExecutorService scheduler) {
         this.matchId = matchId;
@@ -101,6 +108,11 @@ public final class Match {
     /** Tuning/test hook: overrides the 120s reconnect-grace default. See {@link #setTurnTimeoutMs}. */
     public void setReconnectGraceMs(long ms) {
         this.reconnectGraceMs = ms;
+    }
+
+    /** Tuning/test hook: overrides the 30s shop-phase-timeout default. See {@link #setTurnTimeoutMs}. */
+    public void setShopTimeoutMs(long ms) {
+        this.shopTimeoutMs = ms;
     }
 
     // =================================================================
@@ -144,6 +156,16 @@ public final class Match {
 
         static FireOutcome rejected(String reason) {
             return new FireOutcome(false, null, reason);
+        }
+    }
+
+    public record PurchaseOutcome(boolean accepted, Payloads.ShopUpdate update, String rejectReason) {
+        static PurchaseOutcome ok(Payloads.ShopUpdate update) {
+            return new PurchaseOutcome(true, update, null);
+        }
+
+        static PurchaseOutcome rejected(String reason) {
+            return new PurchaseOutcome(false, null, reason);
         }
     }
 
@@ -542,14 +564,137 @@ public final class Match {
         if (roundNumber >= config.maxRounds()) {
             endMatch();
         } else {
-            roundNumber++;
-            rotateTurnOrder();
-            if (turnOrder.isEmpty()) {
-                status = Status.COMPLETE;
-            } else {
-                startRound();
+            openShop();
+        }
+    }
+
+    // =================================================================
+    // Shop (M4, PLAN.md 2.3/4.5, shared/protocol.md section 5): a timed
+    // between-round phase where cash earned in the round just ended can be
+    // spent on additional weapon/shield quantities before the next round's
+    // fresh terrain and full-health respawn.
+    // =================================================================
+
+    private void openShop() {
+        cancelPendingTimeout();
+        status = Status.SHOP;
+        shopToken++;
+        int myShopToken = shopToken;
+
+        shopStockRemaining.clear();
+        for (WeaponDef w : WeaponDef.all().values()) {
+            if (w.defaultQty() != -1) {
+                shopStockRemaining.put(w.weaponId(), w.shopStock());
             }
         }
+        for (ShieldDef s : ShieldDef.all().values()) {
+            shopStockRemaining.put(s.shieldId(), s.shopStock());
+        }
+
+        Payloads.ShopOpened opened = new Payloads.ShopOpened((int) (shopTimeoutMs / 1000), buildPriceList());
+        broadcast("ShopOpened", opened);
+
+        pendingTimeout = scheduler.schedule(() -> onShopTimeout(myShopToken), shopTimeoutMs, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void onShopTimeout(int token) {
+        if (status != Status.SHOP || token != shopToken) {
+            return; // stale: a newer shop phase (shouldn't happen) already superseded this one
+        }
+        advanceToNextRoundOrEnd();
+    }
+
+    /** Per protocol.md: the timeout elapsing always advances, "regardless of purchases made" — no early-exit-on-all-ready shortcut. */
+    private void advanceToNextRoundOrEnd() {
+        roundNumber++;
+        rotateTurnOrder();
+        if (turnOrder.isEmpty()) {
+            status = Status.COMPLETE;
+        } else {
+            // startRound() itself doesn't touch status (it's also called from
+            // startMatch(), which already set IN_PROGRESS) — the SHOP -> next
+            // round transition is the one path that needs to flip it back.
+            status = Status.IN_PROGRESS;
+            startRound();
+        }
+    }
+
+    /** basic_shell (defaultQty -1, "unlimited") is excluded: there's nothing meaningful to buy more of. */
+    private List<Payloads.PriceListEntry> buildPriceList() {
+        List<Payloads.PriceListEntry> list = new ArrayList<>();
+        for (WeaponDef w : WeaponDef.all().values()) {
+            if (w.defaultQty() == -1) {
+                continue;
+            }
+            list.add(new Payloads.PriceListEntry(w.weaponId(), "WEAPON", w.price(),
+                    shopStockRemaining.getOrDefault(w.weaponId(), 0)));
+        }
+        for (ShieldDef s : ShieldDef.all().values()) {
+            list.add(new Payloads.PriceListEntry(s.shieldId(), "SHIELD", s.price(),
+                    shopStockRemaining.getOrDefault(s.shieldId(), 0)));
+        }
+        return list;
+    }
+
+    /**
+     * Validates and applies one {@code ShopPurchase}. Rejections are reported
+     * via {@code ErrorMsg} per protocol.md section 6 ("Insufficient funds or
+     * an out-of-phase purchase gets an ErrorMsg/rejection"), not a dedicated
+     * rejection type like {@code FireRejected} — shop purchases aren't the
+     * high-frequency case that distinction is for.
+     */
+    public synchronized PurchaseOutcome purchase(String playerId, String itemId, String itemType, int quantity) {
+        MatchPlayer buyer = players.get(playerId);
+        if (buyer == null || buyer.departed) {
+            return PurchaseOutcome.rejected("UNKNOWN_PLAYER");
+        }
+        if (status != Status.SHOP) {
+            return PurchaseOutcome.rejected("NOT_SHOP_PHASE");
+        }
+        if (quantity <= 0) {
+            return PurchaseOutcome.rejected("INVALID_QUANTITY");
+        }
+
+        int price;
+        if ("WEAPON".equals(itemType)) {
+            WeaponDef w = WeaponDef.byId(itemId);
+            if (w == null || w.defaultQty() == -1) {
+                return PurchaseOutcome.rejected("INVALID_ITEM");
+            }
+            price = w.price();
+        } else if ("SHIELD".equals(itemType)) {
+            ShieldDef s = ShieldDef.byId(itemId);
+            if (s == null) {
+                return PurchaseOutcome.rejected("INVALID_ITEM");
+            }
+            price = s.price();
+        } else {
+            return PurchaseOutcome.rejected("INVALID_ITEM");
+        }
+
+        long totalCost = (long) price * quantity;
+        if (buyer.player.cash < totalCost) {
+            return PurchaseOutcome.rejected("INSUFFICIENT_CASH");
+        }
+
+        // Shared match-wide stock pool (M4 addition, see WeaponDef.shopStock):
+        // first-come-first-served across all players, checked/decremented
+        // here so a race between two players' near-simultaneous purchases is
+        // resolved correctly (this method is synchronized on the match).
+        int remaining = shopStockRemaining.getOrDefault(itemId, 0);
+        if (quantity > remaining) {
+            return PurchaseOutcome.rejected("OUT_OF_STOCK");
+        }
+
+        buyer.player.cash -= (int) totalCost;
+        buyer.player.loadout.merge(itemId, quantity, Integer::sum);
+        shopStockRemaining.put(itemId, remaining - quantity);
+
+        Payloads.ShopUpdate update = new Payloads.ShopUpdate(
+                playerId, buyer.player.cash, new LinkedHashMap<>(buyer.player.loadout),
+                new LinkedHashMap<>(shopStockRemaining));
+        broadcast("ShopUpdate", update);
+        return PurchaseOutcome.ok(update);
     }
 
     private void endMatch() {
@@ -1207,5 +1352,18 @@ public final class Match {
             mp.player.tank.health = health;
             mp.player.tank.alive = health > 0;
         }
+    }
+
+    /** Test-only hook: sets a player's cash directly, so M4 shop-purchase tests don't depend on real damage/elimination cash flow. */
+    synchronized void debugSetCash(String playerId, int cash) {
+        MatchPlayer mp = players.get(playerId);
+        if (mp != null) {
+            mp.player.cash = cash;
+        }
+    }
+
+    /** Test-only hook: forces the match straight into the shop phase without needing to drive a full round to elimination first. */
+    synchronized void debugOpenShop() {
+        openShop();
     }
 }

@@ -45,7 +45,9 @@
 		fireRejectedReason: null,
 		disconnectedPlayerIds: [],
 		roundEndedInfo: null,
-		matchEndedInfo: null
+		matchEndedInfo: null,
+		shop: null,
+		shopErrorReason: null
 	};
 	let activeShot: PendingShotAnimation | null = null;
 	let localPlayerId: string | null = null;

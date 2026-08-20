@@ -517,6 +517,82 @@ public final class Payloads {
         }
     }
 
+    // ---------------------------------------------------------------
+    // M4: shop messages (shared/protocol.md section 5)
+    // ---------------------------------------------------------------
+
+    /** Client -> Server: {@code ShopPurchase{itemId, itemType, quantity}}. */
+    public static final class ShopPurchase {
+        public String itemId;
+        public String itemType;
+        public int quantity;
+
+        public ShopPurchase() {
+        }
+    }
+
+    /**
+     * One priced item inside {@link ShopOpened#priceList}. {@code stock} (M4
+     * addition beyond the original protocol.md table) is a shared pool
+     * across every player in the match for this shop phase, not per-player —
+     * it plays into shop tactics ("buy the last one before someone else
+     * does"), replenished fresh each round.
+     */
+    public static final class PriceListEntry {
+        public String itemId;
+        public String itemType;
+        public int price;
+        public int stock;
+
+        public PriceListEntry() {
+        }
+
+        public PriceListEntry(String itemId, String itemType, int price, int stock) {
+            this.itemId = itemId;
+            this.itemType = itemType;
+            this.price = price;
+            this.stock = stock;
+        }
+    }
+
+    /** Server -> Client: {@code ShopOpened{timeoutSec, priceList[]}}, broadcast at shop-phase start. */
+    public static final class ShopOpened {
+        public int timeoutSec;
+        public List<PriceListEntry> priceList;
+
+        public ShopOpened() {
+        }
+
+        public ShopOpened(int timeoutSec, List<PriceListEntry> priceList) {
+            this.timeoutSec = timeoutSec;
+            this.priceList = priceList;
+        }
+    }
+
+    /**
+     * Server -> Client: {@code ShopUpdate{playerId, cash, loadout, stockRemaining}},
+     * broadcast to everyone after a successful purchase (not just the buyer)
+     * so every client's price list reflects the shared stock pool shrinking
+     * in real time — that's what makes stock scarcity an actual multiplayer
+     * tactic rather than a per-player detail.
+     */
+    public static final class ShopUpdate {
+        public String playerId;
+        public int cash;
+        public Map<String, Integer> loadout;
+        public Map<String, Integer> stockRemaining;
+
+        public ShopUpdate() {
+        }
+
+        public ShopUpdate(String playerId, int cash, Map<String, Integer> loadout, Map<String, Integer> stockRemaining) {
+            this.playerId = playerId;
+            this.cash = cash;
+            this.loadout = loadout;
+            this.stockRemaining = stockRemaining;
+        }
+    }
+
     /** Server -> Client: {@code ErrorMsg{code, message}}. */
     public static final class ErrorMsg {
         public String code;

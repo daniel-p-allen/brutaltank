@@ -9,6 +9,7 @@
 	import { onDestroy } from 'svelte';
 	import GameCanvas from './game/GameCanvas.svelte';
 	import FireControls from './hud/FireControls.svelte';
+	import ShopOverlay from './shop/ShopOverlay.svelte';
 	import { matchStore } from '../stores/matchStore';
 	import { sessionStore } from '../stores/sessionStore';
 
@@ -55,7 +56,11 @@
 			<div class="toast reject">Fire rejected: {$matchStore.fireRejectedReason}</div>
 		{/if}
 
-		<FireControls />
+		{#if $matchStore.status === 'SHOP'}
+			<ShopOverlay />
+		{:else}
+			<FireControls />
+		{/if}
 
 		<div class="players">
 			{#each $matchStore.players as player (player.playerId)}

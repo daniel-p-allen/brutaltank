@@ -20,6 +20,12 @@
 //   - PlayerDisconnected/PlayerReconnected -> tracks a small set of
 //                          currently-disconnected playerIds for per-player
 //                          status badges.
+//   - ShopOpened        -> flips status to SHOP and records the price list
+//                          (with initial stock) + timeout for ShopOverlay.
+//   - ShopUpdate        -> patches the purchasing player's cash/loadout and
+//                          the shared stock pool (broadcast to everyone).
+//   - ErrorMsg          -> currently only surfaced for rejected
+//                          ShopPurchases (shopErrorReason).
 //
 // See shared/protocol.md sections 3-4 for the message shapes this store
 // must stay in lockstep with.
@@ -28,11 +34,15 @@ import { writable } from 'svelte/store';
 import { wsClient } from '../net/wsClient';
 import { parseEnvelope } from '../protocol/envelope';
 import type {
+	ErrorMsgPayload,
 	FireRejectedPayload,
 	MatchEndedPayload,
 	MatchStateSyncPayload,
 	Player,
+	PriceListEntry,
 	RoundEndedPayload,
+	ShopOpenedPayload,
+	ShopUpdatePayload,
 	ShotResolvedPayload,
 	Terrain,
 	TurnStartedPayload,
@@ -66,6 +76,15 @@ export interface MatchState {
 	roundEndedInfo: RoundEndedPayload | null;
 	/** Set on MatchEnded — drives the final-standings screen. */
 	matchEndedInfo: MatchEndedPayload | null;
+	/**
+	 * Set on ShopOpened, cleared on the next MatchStateSync/MatchEnded —
+	 * drives ShopOverlay.svelte. `stockRemaining` starts from each price
+	 * list entry's initial `stock` and is replaced wholesale by every
+	 * ShopUpdate's `stockRemaining` (the shared pool, M4).
+	 */
+	shop: { priceList: PriceListEntry[]; timeoutSec: number; openedAtMs: number; stockRemaining: Record<string, number> } | null;
+	/** Reason code from the most recent ErrorMsg (currently only used for rejected ShopPurchases), cleared on the next ShopOpened. */
+	shopErrorReason: string | null;
 }
 
 function initialState(): MatchState {
@@ -86,7 +105,9 @@ function initialState(): MatchState {
 		fireRejectedReason: null,
 		disconnectedPlayerIds: [],
 		roundEndedInfo: null,
-		matchEndedInfo: null
+		matchEndedInfo: null,
+		shop: null,
+		shopErrorReason: null
 	};
 }
 
@@ -111,7 +132,9 @@ export function applyMatchStateSync(payload: MatchStateSyncPayload): MatchState 
 		// badges rebuild from subsequent PlayerDisconnected events.
 		disconnectedPlayerIds: [],
 		roundEndedInfo: null,
-		matchEndedInfo: null
+		matchEndedInfo: null,
+		shop: null,
+		shopErrorReason: null
 	};
 }
 
@@ -175,7 +198,38 @@ export function applyRoundEnded(state: MatchState, payload: RoundEndedPayload): 
 
 /** Pure helper (exported for unit testing). */
 export function applyMatchEnded(state: MatchState, payload: MatchEndedPayload): MatchState {
-	return { ...state, matchEndedInfo: payload, status: 'COMPLETE' };
+	return { ...state, matchEndedInfo: payload, status: 'COMPLETE', shop: null, shopErrorReason: null };
+}
+
+/** Pure helper (exported for unit testing): opens the shop UI with a fresh price list/stock snapshot. */
+export function applyShopOpened(state: MatchState, payload: ShopOpenedPayload): MatchState {
+	return {
+		...state,
+		status: 'SHOP',
+		shop: {
+			priceList: payload.priceList,
+			timeoutSec: payload.timeoutSec,
+			openedAtMs: Date.now(),
+			stockRemaining: Object.fromEntries(payload.priceList.map((e) => [e.itemId, e.stock]))
+		},
+		shopErrorReason: null
+	};
+}
+
+/** Pure helper (exported for unit testing): patches the purchaser's cash/loadout and the shared stock pool. */
+export function applyShopUpdate(state: MatchState, payload: ShopUpdatePayload): MatchState {
+	return {
+		...state,
+		players: state.players.map((p) =>
+			p.playerId === payload.playerId ? { ...p, cash: payload.cash, loadout: payload.loadout } : p
+		),
+		shop: state.shop ? { ...state.shop, stockRemaining: payload.stockRemaining } : state.shop
+	};
+}
+
+/** Pure helper (exported for unit testing). */
+export function applyErrorMsg(state: MatchState, payload: ErrorMsgPayload): MatchState {
+	return { ...state, shopErrorReason: payload.code };
 }
 
 /** Pure helper (exported for unit testing). */
@@ -246,6 +300,18 @@ function createMatchStore() {
 
 			case 'MatchEnded':
 				update((state) => applyMatchEnded(state, envelope.payload as MatchEndedPayload));
+				return;
+
+			case 'ShopOpened':
+				update((state) => applyShopOpened(state, envelope.payload as ShopOpenedPayload));
+				return;
+
+			case 'ShopUpdate':
+				update((state) => applyShopUpdate(state, envelope.payload as ShopUpdatePayload));
+				return;
+
+			case 'ErrorMsg':
+				update((state) => applyErrorMsg(state, envelope.payload as ErrorMsgPayload));
 				return;
 
 			case 'PlayerDisconnected':

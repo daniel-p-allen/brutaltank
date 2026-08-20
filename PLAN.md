@@ -233,6 +233,7 @@ Shields are activated by spending a turn (the `Fire` message's `weaponId` can re
 - Round-survival participation bonus: +50 flat.
 - Shop phase duration: 30s, server-enforced.
 - Price tiers: free/starter (0), cheap (120-150), mid (200-280), premium (300), rare (600).
+- **Shop stock is limited, not infinite** (M4 addition beyond this table — user feedback: "the shop should not be unlimited in stock... this plays into tactics"). Each purchasable weapon/shield has a `shopStock` count that is a **shared pool across every player in the match**, not per-player, replenished fresh at the start of each shop phase. Sized in inverse proportion to power/price (e.g. Nuke: 3, Baby Missile: 20) so scarce/powerful items create real "buy it now before someone else does" tactics. `basic_shell` is excluded from the shop entirely (its `defaultQty` is already -1/unlimited). See `server/.../domain/weapon/WeaponDef.java`/`ShieldDef.java`'s `shopStock` field and `Match.purchase()`'s `OUT_OF_STOCK` rejection.
 
 All numbers above are explicitly starting values for playtesting, not final balance.
 
@@ -249,6 +250,10 @@ All numbers above are explicitly starting values for playtesting, not final bala
 - **M6 — Polish/juice**: screen shake, sound hooks, optional client-side prediction, turn-timer urgency states, spectator mode, replay/history (stretch), basic anti-abuse (Fire spam rate limiting, input validation). *Checkpoint: game feels good to replay, not just functionally correct.*
 
 This ordering front-loads the highest-risk item (server-authoritative shot resolution + terrain sync over WebSocket, M1) before investing in breadth (weapon count, art).
+
+### Future ideas (post-v1, not yet scheduled into a milestone)
+
+- **Single-player mode + a bot opponent** (user request, noted for future reference). Not scoped yet — would need at minimum a bot decision loop (pick a weapon/angle/power against the current terrain+opponent state) that can act through the same server-authoritative `Match.fire()` path a human player uses, so it doesn't need its own parallel code path. Revisit once the human-multiplayer game loop (through at least M4) is solid.
 
 ---
 
