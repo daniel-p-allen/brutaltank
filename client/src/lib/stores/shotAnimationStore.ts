@@ -16,6 +16,14 @@ export interface PendingShotAnimation {
 	weaponId: string;
 	trajectory: Point[];
 	impact: Point;
+	/**
+	 * Every real detonation point this shot produced (see
+	 * ShotResolvedPayload.allImpacts) — for a single-impact weapon this is
+	 * just [impact]; for MIRV/Cluster Bomb it's every child's/bomblet's
+	 * landing point, so the flash effect renders at each one instead of
+	 * just the shared `impact` (MIRV's apex / Cluster's primary hit).
+	 */
+	impacts: Point[];
 	/** performance.now() timestamp when this animation was queued. */
 	startedAtMs: number;
 	/**

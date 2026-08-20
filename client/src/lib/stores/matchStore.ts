@@ -26,6 +26,8 @@
 //                          the shared stock pool (broadcast to everyone).
 //   - ErrorMsg          -> currently only surfaced for rejected
 //                          ShopPurchases (shopErrorReason).
+//   - PlayerAiming      -> records a player's live aim angle (remoteAim),
+//                          cosmetic-only, not turn-gated.
 //
 // See shared/protocol.md sections 3-4 for the message shapes this store
 // must stay in lockstep with.
@@ -39,6 +41,7 @@ import type {
 	MatchEndedPayload,
 	MatchStateSyncPayload,
 	Player,
+	PlayerAimingPayload,
 	PriceListEntry,
 	RoundEndedPayload,
 	ShopOpenedPayload,
@@ -85,6 +88,14 @@ export interface MatchState {
 	shop: { priceList: PriceListEntry[]; timeoutSec: number; openedAtMs: number; stockRemaining: Record<string, number> } | null;
 	/** Reason code from the most recent ErrorMsg (currently only used for rejected ShopPurchases), cleared on the next ShopOpened. */
 	shopErrorReason: string | null;
+	/**
+	 * Every player's last-known live aim angle (from PlayerAiming broadcasts),
+	 * keyed by playerId. Cosmetic-only — tankRenderer uses this so every
+	 * connected client sees every tank's barrel track the angle its owner is
+	 * currently dragging, not just the local player's own tank. Cleared on
+	 * MatchStateSync since a fresh round/reconnect has no live values yet.
+	 */
+	remoteAim: Record<string, number>;
 }
 
 function initialState(): MatchState {
@@ -107,7 +118,8 @@ function initialState(): MatchState {
 		roundEndedInfo: null,
 		matchEndedInfo: null,
 		shop: null,
-		shopErrorReason: null
+		shopErrorReason: null,
+		remoteAim: {}
 	};
 }
 
@@ -134,7 +146,8 @@ export function applyMatchStateSync(payload: MatchStateSyncPayload): MatchState 
 		roundEndedInfo: null,
 		matchEndedInfo: null,
 		shop: null,
-		shopErrorReason: null
+		shopErrorReason: null,
+		remoteAim: {}
 	};
 }
 
@@ -154,9 +167,14 @@ export function applyShotResolved(state: MatchState, payload: ShotResolvedPayloa
 	const players = state.players.map((p) => {
 		const dmg = healthByPlayer.get(p.playerId);
 		const fall = fallByPlayer.get(p.playerId);
-		if (!dmg && !fall) return p;
+		// The shooter's ammo count for weaponId decrements on every shot server-side,
+		// but without this the client only ever saw it refresh on the next full
+		// MatchStateSync (i.e. the next round) — see ShotResolvedPayload.ammoRemaining.
+		const isShooter = p.playerId === payload.shooterId;
+		if (!dmg && !fall && !isShooter) return p;
 		return {
 			...p,
+			...(isShooter ? { loadout: { ...p.loadout, [payload.weaponId]: payload.ammoRemaining } } : {}),
 			tank: {
 				...p.tank,
 				...(dmg ? { health: dmg.newHealth, alive: !dmg.eliminated } : {}),
@@ -232,6 +250,11 @@ export function applyErrorMsg(state: MatchState, payload: ErrorMsgPayload): Matc
 	return { ...state, shopErrorReason: payload.code };
 }
 
+/** Pure helper (exported for unit testing): records a player's live aim angle from a PlayerAiming broadcast. */
+export function applyPlayerAiming(state: MatchState, payload: PlayerAimingPayload): MatchState {
+	return { ...state, remoteAim: { ...state.remoteAim, [payload.playerId]: payload.angleDeg } };
+}
+
 /** Pure helper (exported for unit testing). */
 export function applyPlayerDisconnected(state: MatchState, playerId: string): MatchState {
 	if (state.disconnectedPlayerIds.includes(playerId)) return state;
@@ -276,6 +299,7 @@ function createMatchStore() {
 					weaponId: payload.weaponId,
 					trajectory: payload.trajectory,
 					impact: payload.impact,
+					impacts: payload.allImpacts,
 					preShotHeights,
 					preShotHealth
 				});
@@ -312,6 +336,10 @@ function createMatchStore() {
 
 			case 'ErrorMsg':
 				update((state) => applyErrorMsg(state, envelope.payload as ErrorMsgPayload));
+				return;
+
+			case 'PlayerAiming':
+				update((state) => applyPlayerAiming(state, envelope.payload as PlayerAimingPayload));
 				return;
 
 			case 'PlayerDisconnected':

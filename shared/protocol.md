@@ -252,7 +252,23 @@ Cover in-round play: turn order, firing, shot resolution, and round lifecycle (`
 
 Only accepted from the player whose turn it currently is (`AWAITING_FIRE` state); otherwise rejected with `FireRejected`.
 
+#### `AimUpdate`
+
+```json
+{ "type": "AimUpdate", "v": 1, "payload": { "angleDeg": 62 } }
+```
+
+Cosmetic-only live aim broadcast, **not turn-gated** — any player can drag their aim slider at any time (angle sliders stay enabled outside your turn, per user feedback) and have their tank's barrel visibly track it on every connected client, not just their own. No `requestId`/reply; the server simply relays it as `PlayerAiming` to everyone in the match, including back to the sender. Never validated against game state and never affects gameplay — purely rendering. Sent throttled by the client (not on every pixel of slider drag) to keep traffic light.
+
 ### Server → Client
+
+#### `PlayerAiming`
+
+```json
+{ "type": "PlayerAiming", "v": 1, "payload": { "playerId": "p-2", "angleDeg": 62 } }
+```
+
+Broadcast relay of an `AimUpdate` to every connected client. `tankRenderer` uses this (keyed by `playerId`) to draw every tank's barrel at its last-known live angle, falling back to a neutral default for any player who hasn't sent one yet this session.
 
 #### `TurnStarted`
 
@@ -288,7 +304,10 @@ Sent only to the requester, echoing their `requestId`.
     "impact": { "x": 640, "y": 388 },
     "terrainDelta": { "startX": 600, "endX": 680, "heights": [390, 388, "... only the affected column range ..."] },
     "damageEvents": [ { "playerId": "p-1", "damage": 22, "newHealth": 78, "eliminated": false } ],
-    "cashEarned": [ { "playerId": "p-2", "amount": 110 } ]
+    "cashEarned": [ { "playerId": "p-2", "amount": 110 } ],
+    "tankFalls": [ { "playerId": "p-1", "newY": 430 } ],
+    "ammoRemaining": 4,
+    "allImpacts": [ { "x": 640, "y": 388 } ]
   }
 }
 ```
@@ -302,6 +321,9 @@ Sent only to the requester, echoing their `requestId`.
 | `terrainDelta` | `{startX, endX, heights[]}` | Only the affected column range — the sole mechanism for keeping client terrain in sync outside of `MatchStateSync`. `heights` has `endX - startX + 1` entries. |
 | `damageEvents` | array | One entry per tank affected by the blast (including possible self-damage). `eliminated: true` when `newHealth <= 0`. |
 | `cashEarned` | array | One entry per player credited cash from this shot (damage dealt to others × 5, elimination bonus, etc. — see plan section 4.5). |
+| `tankFalls` | array | One entry per tank whose ground gave way this shot (crater/gully undermined it, or a steep cliff it cut settled) and dropped to the new terrain level — `{playerId, newY}`, position-only; any resulting fall damage is folded into `damageEvents` instead. |
+| `ammoRemaining` | integer | The shooter's remaining quantity of `weaponId` after this shot (-1 == unlimited, same convention as `loadout` elsewhere). Lets the client's weapon-select HUD count down live instead of only refreshing on the next `MatchStateSync`. |
+| `allImpacts` | array of `{x,y}` | Every real (damage-capable) detonation point this shot produced, in order — for a single-impact weapon this is just `[impact]`; for MIRV/Cluster Bomb it's every child's/bomblet's landing point. Cosmetic zero-damage marks (Tunneling Shot/Digger's bore track, Bouncing Betty's skip marks) are excluded. Lets the client flash an explosion at every real detonation instead of only at `impact` (which for a multi-impact weapon is just the shared split/primary point). |
 
 Broadcast to every player in the match — all clients must render an identical result from the same message (this is the core M1 checkpoint: "two tabs fire a shell, see identical terrain deformation and damage on both"). Echoes the firing player's `requestId`; other clients receive it without a matching pending request, which is fine since `requestId` is just correlation metadata.
 

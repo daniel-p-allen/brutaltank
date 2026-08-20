@@ -14,6 +14,7 @@
 	// shot) — only the Fire button and weapon select are turn-gated.
 
 	import { sendFire } from '../../game/input/fireInput';
+	import { sendAimUpdate } from '../../game/input/aimInput';
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
 	import { aimStore } from '../../stores/aimStore';
@@ -22,6 +23,12 @@
 	$: isMyTurn =
 		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
 	$: disabled = !isMyTurn || $matchStore.awaitingShotResolution;
+
+	// Broadcasts the local player's live aim angle so every connected client's
+	// tankRenderer can show this tank's barrel tracking it, not just the
+	// local view — throttled inside sendAimUpdate. Not turn-gated, matching
+	// the sliders themselves staying enabled outside your turn.
+	$: sendAimUpdate($aimStore.angleDeg);
 
 	function fire(): void {
 		if (disabled) return;

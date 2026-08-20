@@ -23,7 +23,13 @@
 	// not matchStore.status === 'WAITING' (which never actually happens).
 	$: screen = ((): Screen => {
 		if ($matchStore.matchEndedInfo || $matchStore.status === 'COMPLETE') return 'post-match';
-		if ($matchStore.status === 'IN_PROGRESS') return 'match';
+		// SHOP (M4) is part of the match screen (MatchScreen swaps in
+		// ShopOverlay for FireControls during it) — without this, the shop
+		// phase fell through to the `lobbyStore.matchId` check below and
+		// incorrectly routed back to LobbyScreen, since lobbyStore.matchId is
+		// never cleared once a match starts (LobbyUpdate simply stops
+		// arriving; nothing resets it) so it's still truthy at that point.
+		if ($matchStore.status === 'IN_PROGRESS' || $matchStore.status === 'SHOP') return 'match';
 		if ($lobbyStore.matchId) return 'lobby';
 		return 'menu';
 	})();
@@ -31,7 +37,6 @@
 
 <main>
 	<h1>BrutalTank</h1>
-	<p class="subtitle">M2 — full lobby &amp; turn-based flow</p>
 	<ConnectionStatus />
 
 	{#if $connectionStore.status === 'open'}
@@ -57,10 +62,5 @@
 
 	h1 {
 		margin-bottom: 0;
-	}
-
-	.subtitle {
-		color: #888;
-		margin-top: 0.25rem;
 	}
 </style>

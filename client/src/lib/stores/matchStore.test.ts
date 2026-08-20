@@ -37,6 +37,7 @@ describe('matchStore', () => {
 	let matchStore: typeof import('./matchStore').matchStore;
 	let applyMatchStateSync: typeof import('./matchStore').applyMatchStateSync;
 	let applyShotResolved: typeof import('./matchStore').applyShotResolved;
+	let pendingShotAnimation: typeof import('./shotAnimationStore').pendingShotAnimation;
 	let get: typeof import('svelte/store').get;
 
 	beforeEach(async () => {
@@ -45,6 +46,7 @@ describe('matchStore', () => {
 		vi.resetModules();
 		({ get } = await import('svelte/store'));
 		({ matchStore, applyMatchStateSync, applyShotResolved } = await import('./matchStore'));
+		({ pendingShotAnimation } = await import('./shotAnimationStore'));
 	});
 
 	it('starts empty', () => {
@@ -90,7 +92,9 @@ describe('matchStore', () => {
 			terrainDelta: { startX: 6, endX: 9, heights: [200, 201, 202, 203] },
 			damageEvents: [{ playerId: 'p-2', damage: 22, newHealth: 78, eliminated: false }],
 			cashEarned: [{ playerId: 'p-1', amount: 110 }],
-			tankFalls: []
+			tankFalls: [],
+			ammoRemaining: 4,
+			allImpacts: [{ x: 8, y: 108 }]
 		};
 
 		MockWebSocket.latest().emitMessage(
@@ -108,6 +112,7 @@ describe('matchStore', () => {
 
 		const p1 = state.players.find((p) => p.playerId === 'p-1')!;
 		expect(p1.tank.health).toBe(100); // untouched, no damageEvent for p-1
+		expect(p1.loadout.basic_shell).toBe(4); // shooter's ammo count for weaponId decrements live
 	});
 
 	it('marks eliminated when newHealth <= 0 / eliminated true', () => {
@@ -119,7 +124,9 @@ describe('matchStore', () => {
 			terrainDelta: { startX: 0, endX: 0, heights: [99] },
 			damageEvents: [{ playerId: 'p-2', damage: 100, newHealth: 0, eliminated: true }],
 			cashEarned: [],
-			tankFalls: []
+			tankFalls: [],
+			ammoRemaining: -1,
+			allImpacts: []
 		});
 
 		const p2 = state.players.find((p) => p.playerId === 'p-2')!;
@@ -136,7 +143,9 @@ describe('matchStore', () => {
 			terrainDelta: { startX: 500, endX: 510, heights: new Array(11).fill(1) },
 			damageEvents: [],
 			cashEarned: [],
-			tankFalls: []
+			tankFalls: [],
+			ammoRemaining: -1,
+			allImpacts: []
 		});
 		expect(state.terrain.heights).toEqual(samplePayload.terrain.heights);
 	});
@@ -150,7 +159,9 @@ describe('matchStore', () => {
 			terrainDelta: { startX: 0, endX: 0, heights: [99] },
 			damageEvents: [],
 			cashEarned: [],
-			tankFalls: [{ playerId: 'p-2', newY: 250 }]
+			tankFalls: [{ playerId: 'p-2', newY: 250 }],
+			ammoRemaining: -1,
+			allImpacts: []
 		});
 
 		const p2 = state.players.find((p) => p.playerId === 'p-2')!;
@@ -408,6 +419,33 @@ describe('matchStore', () => {
 		expect(get(matchStore).shopErrorReason).toBe('INSUFFICIENT_CASH');
 	});
 
+	it('records live aim angles per player from PlayerAiming, regardless of whose turn it is', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		// p2 isn't the active player (p1 is, per samplePayload's currentTurnIndex: 0),
+		// but aim broadcasts aren't turn-gated.
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerAiming', v: 1, payload: { playerId: 'p-2', angleDeg: 77 } })
+		);
+		expect(get(matchStore).remoteAim).toEqual({ 'p-2': 77 });
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerAiming', v: 1, payload: { playerId: 'p-1', angleDeg: 30 } })
+		);
+		expect(get(matchStore).remoteAim).toEqual({ 'p-2': 77, 'p-1': 30 });
+
+		// A later update for the same player replaces, not accumulates.
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerAiming', v: 1, payload: { playerId: 'p-2', angleDeg: 12 } })
+		);
+		expect(get(matchStore).remoteAim).toEqual({ 'p-2': 12, 'p-1': 30 });
+	});
+
 	it('clears the shop on MatchEnded', async () => {
 		const { wsClient } = await import('../net/wsClient');
 		wsClient.connect();
@@ -428,5 +466,42 @@ describe('matchStore', () => {
 			JSON.stringify({ type: 'MatchEnded', v: 1, payload: { finalStandings: [] } })
 		);
 		expect(get(matchStore).shop).toBeNull();
+	});
+
+	it('queues every ShotResolved.allImpacts point into the pending shot animation (MIRV/Cluster: not just one shared impact)', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		const multiImpactShot: ShotResolvedPayload = {
+			shooterId: 'p-1',
+			weaponId: 'mirv',
+			trajectory: [{ x: 1, y: 101 }],
+			impact: { x: 5, y: 90 }, // the shared apex/split point
+			terrainDelta: { startX: 0, endX: 0, heights: [99] },
+			damageEvents: [],
+			cashEarned: [],
+			tankFalls: [],
+			ammoRemaining: 1,
+			allImpacts: [
+				{ x: 3, y: 95 },
+				{ x: 4, y: 92 },
+				{ x: 6, y: 92 },
+				{ x: 7, y: 95 }
+			]
+		};
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'ShotResolved', v: 1, requestId: 'r11', payload: multiImpactShot })
+		);
+
+		const animation = get(pendingShotAnimation);
+		expect(animation).not.toBeNull();
+		expect(animation!.impact).toEqual({ x: 5, y: 90 });
+		expect(animation!.impacts).toEqual(multiImpactShot.allImpacts);
+		expect(animation!.impacts).toHaveLength(4);
 	});
 });

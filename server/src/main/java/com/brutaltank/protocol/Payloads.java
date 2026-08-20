@@ -131,6 +131,35 @@ public final class Payloads {
         }
     }
 
+    /**
+     * Client -> Server: {@code AimUpdate{angleDeg}}. Cosmetic-only, not
+     * turn-gated (any player can drag their aim slider at any time per user
+     * feedback) — purely relayed so every client's tankRenderer can show
+     * everyone's barrel tracking their live angle, not just the local
+     * player's own. No server-side validation beyond "sender is a real,
+     * non-departed player in this match"; never affects gameplay state.
+     */
+    public static final class AimUpdate {
+        public double angleDeg;
+
+        public AimUpdate() {
+        }
+    }
+
+    /** Server -> Client: {@code PlayerAiming{playerId, angleDeg}}, broadcast relay of an AimUpdate. */
+    public static final class PlayerAiming {
+        public String playerId;
+        public double angleDeg;
+
+        public PlayerAiming() {
+        }
+
+        public PlayerAiming(String playerId, double angleDeg) {
+            this.playerId = playerId;
+            this.angleDeg = angleDeg;
+        }
+    }
+
     /** Server -> Client: {@code FireRejected{reason}}. */
     public static final class FireRejected {
         public String reason;
@@ -249,6 +278,27 @@ public final class Payloads {
         public List<DamageEvent> damageEvents;
         public List<CashEarned> cashEarned;
         public List<TankFall> tankFalls;
+        /**
+         * The shooter's remaining quantity of {@code weaponId} after this
+         * shot (-1 == unlimited, same convention as loadout elsewhere).
+         * Without this, clients only ever saw ammo counts refresh on the
+         * next full {@code MatchStateSync} (i.e. the next round) even though
+         * the server decremented it correctly on every shot.
+         */
+        public int ammoRemaining;
+        /**
+         * Every "real" (non-cosmetic, damage-capable) detonation point this
+         * shot produced, in order — for a single-impact weapon this is just
+         * {@code [impact]}; for MIRV/Cluster Bomb it's every child/bomblet's
+         * landing point. Without this, the client's single flight-animation
+         * dot only ever flashed at {@code impact} (the shared MIRV apex /
+         * primary Cluster point), so a multi-impact shot's other detonations
+         * silently changed the terrain with no explosion shown there at all.
+         * Cosmetic zero-damage marks (Tunneling's bore track, Bouncing
+         * Betty's skip marks) are deliberately excluded — those already read
+         * as a trail, not additional explosions.
+         */
+        public List<Impact> allImpacts;
 
         public ShotResolved() {
         }

@@ -80,6 +80,22 @@ export interface FirePayload {
 }
 
 // ---------------------------------------------------------------------------
+// AimUpdate / PlayerAiming (cosmetic-only live aim broadcast, not turn-gated)
+// ---------------------------------------------------------------------------
+
+export interface AimUpdatePayload {
+	angleDeg: number;
+}
+
+export interface PlayerAimingPayload {
+	playerId: string;
+	angleDeg: number;
+}
+
+export type AimUpdateEnvelope = Envelope<AimUpdatePayload>;
+export type PlayerAimingEnvelope = Envelope<PlayerAimingPayload>;
+
+// ---------------------------------------------------------------------------
 // ShotResolved (server -> client)
 // ---------------------------------------------------------------------------
 
@@ -117,6 +133,15 @@ export interface ShotResolvedPayload {
 	damageEvents: DamageEvent[];
 	cashEarned: CashEarned[];
 	tankFalls: TankFall[];
+	/** The shooter's remaining quantity of weaponId after this shot (-1 == unlimited). */
+	ammoRemaining: number;
+	/**
+	 * Every real (damage-capable) detonation point this shot produced, in
+	 * order — for a single-impact weapon this is just [impact]; for
+	 * MIRV/Cluster Bomb it's every child's/bomblet's landing point. Cosmetic
+	 * zero-damage marks (tunnel bore track, bounce skip marks) are excluded.
+	 */
+	allImpacts: Point[];
 }
 
 export type MatchStateSyncEnvelope = Envelope<MatchStateSyncPayload>;

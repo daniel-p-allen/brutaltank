@@ -47,7 +47,8 @@
 		roundEndedInfo: null,
 		matchEndedInfo: null,
 		shop: null,
-		shopErrorReason: null
+		shopErrorReason: null,
+		remoteAim: {}
 	};
 	let activeShot: PendingShotAnimation | null = null;
 	let localPlayerId: string | null = null;
@@ -84,12 +85,21 @@
 					})
 				: scene.players;
 
+			// Local player's own live drag always wins over its last broadcast
+			// PlayerAiming echo (zero-latency local feedback); every other
+			// player's barrel tracks their last-known live angle from
+			// matchStore.remoteAim.
+			const aimAngleByPlayerId = { ...scene.remoteAim };
+			if (localPlayerId != null) {
+				aimAngleByPlayerId[localPlayerId] = aim.angleDeg;
+			}
+
 			drawTerrain(ctx, heightsToDraw, viewport);
-			drawTanks(ctx, playersToDraw, viewport, localPlayerId, aim.angleDeg);
+			drawTanks(ctx, playersToDraw, viewport, aimAngleByPlayerId);
 
 			if (activeShot) {
-				drawProjectile(ctx, activeShot.trajectory, activeShot.impact, elapsed, viewport);
-				if (isAnimationFinished(elapsed)) {
+				drawProjectile(ctx, activeShot.trajectory, activeShot.impacts, activeShot.weaponId, elapsed, viewport);
+				if (isAnimationFinished(elapsed, activeShot.weaponId)) {
 					clearShotAnimation();
 				}
 			}

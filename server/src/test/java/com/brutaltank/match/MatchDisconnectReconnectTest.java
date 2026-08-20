@@ -70,18 +70,24 @@ class MatchDisconnectReconnectTest {
     @Test
     @Timeout(10)
     void disconnectingActivePlayerDoesNotHangMatchTurnAutoSkips() {
+        // 3 players (not 2): two remain connected after p1 disconnects, so
+        // this exercises plain auto-skip-to-next-player, not the "all but one
+        // disconnected" early round-end covered by turnLapseWithAllButOne...
+        // below.
         Match match = newMatch("m-disc-1");
         match.setTurnTimeoutMs(150);
         match.setReconnectGraceMs(60_000); // long grace: shouldn't fire in this test
         Joined p1 = join(match, "P1");
         Joined p2 = join(match, "P2");
+        Joined p3 = join(match, "P3");
         match.setReady(p1.playerId(), true);
         match.setReady(p2.playerId(), true);
+        match.setReady(p3.playerId(), true);
 
         assertEquals(p1.playerId(), match.activePlayerId());
         match.handleDisconnect(p1.playerId());
 
-        // A PlayerDisconnected broadcast should have gone out to the remaining player.
+        // A PlayerDisconnected broadcast should have gone out to the remaining players.
         assertNotNull(p2.sink().lastPayloadOfType("PlayerDisconnected"));
 
         // The match must not hang: the normal 30s(150ms in test) turn timer
@@ -160,5 +166,74 @@ class MatchDisconnectReconnectTest {
         // Match still functions: p1 (still active) can fire.
         assertEquals(p1.playerId(), match.activePlayerId());
         assertTrue(match.fire(p1.playerId(), "r1", "basic_shell", 45, 40).accepted());
+    }
+
+    @Test
+    @Timeout(10)
+    void lastPlayerStandingAfterOthersDisconnectEndsRoundAndOpensShop() {
+        // "All but one drops out" via disconnects rather than combat
+        // elimination (M4: RoundEnded -> ShopOpened, not combat) — user
+        // feedback asked specifically to verify this path.
+        Match match = newMatch("m-disc-5");
+        match.setTurnTimeoutMs(30_000);
+        match.setReconnectGraceMs(100); // short: let grace really expire
+        Joined p1 = join(match, "P1");
+        Joined p2 = join(match, "P2");
+        match.setReady(p1.playerId(), true);
+        match.setReady(p2.playerId(), true);
+
+        String activeBeforeDisconnect = match.activePlayerId();
+        String disconnecting = activeBeforeDisconnect.equals(p1.playerId()) ? p2.playerId() : p1.playerId();
+        String survivor = activeBeforeDisconnect.equals(p1.playerId()) ? p1.playerId() : p2.playerId();
+
+        match.handleDisconnect(disconnecting);
+        waitUntil(() -> match.isDeparted(disconnecting), 5_000);
+
+        // Once the sole other player departs, the round must end (survivor
+        // wins) and the match must move on to the shop phase, not hang.
+        waitUntil(() -> match.status() == Match.Status.SHOP, 5_000);
+        assertEquals(1, match.roundNumber(), "round number shouldn't advance until the shop phase closes");
+
+        FakeMessageSink survivorSink = survivor.equals(p1.playerId()) ? p1.sink() : p2.sink();
+        var roundEnded = survivorSink.lastPayloadOfType("RoundEnded");
+        assertNotNull(roundEnded, "expected RoundEnded to have been broadcast");
+        assertEquals(survivor, roundEnded.get("winnerPlayerId").asText());
+        assertNotNull(survivorSink.lastPayloadOfType("ShopOpened"), "expected ShopOpened to follow RoundEnded");
+    }
+
+    @Test
+    @Timeout(10)
+    void turnLapseWithAllButOneDisconnectedEndsRoundImmediatelyWithoutWaitingOutGrace() {
+        // User feedback: "if a turn lapses with everyone except one
+        // disconnecting, that should be the end of the game" -- don't make
+        // the sole connected player wait out everyone else's full reconnect
+        // grace period one at a time; end it as soon as an auto-skip lapse
+        // happens and at most one alive player is still connected.
+        Match match = newMatch("m-disc-6");
+        match.setTurnTimeoutMs(100); // short: let turns really lapse via auto-skip
+        match.setReconnectGraceMs(60_000); // long: this test must NOT depend on grace expiring
+        Joined p1 = join(match, "P1");
+        Joined p2 = join(match, "P2");
+        Joined p3 = join(match, "P3");
+        match.setReady(p1.playerId(), true);
+        match.setReady(p2.playerId(), true);
+        match.setReady(p3.playerId(), true);
+
+        // p1 is active first; disconnect p2 and p3 (neither departs -- grace
+        // is long), leaving p1 the only connected player.
+        match.handleDisconnect(p2.playerId());
+        match.handleDisconnect(p3.playerId());
+        assertTrue(match.isAlive(p2.playerId()), "still alive/non-departed, just disconnected");
+        assertTrue(match.isAlive(p3.playerId()), "still alive/non-departed, just disconnected");
+
+        // p1's own turn resolves fine (still connected), advancing to p2's
+        // turn, which must lapse (auto-skip) since p2 is disconnected -- that
+        // lapse is what should end the round, well before the 60s grace.
+        waitUntil(() -> match.status() == Match.Status.SHOP, 5_000);
+
+        var roundEnded = p1.sink().lastPayloadOfType("RoundEnded");
+        assertNotNull(roundEnded, "expected RoundEnded to have been broadcast");
+        assertEquals(p1.playerId(), roundEnded.get("winnerPlayerId").asText(),
+                "the sole connected player should be awarded the round, not whichever disconnected tank has the most HP");
     }
 }

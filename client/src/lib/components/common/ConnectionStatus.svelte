@@ -23,10 +23,6 @@
 	})();
 
 	$: statusClass = $connectionStore.status === 'open' ? 'ok' : 'warn';
-
-	function sendPing() {
-		connectionStore.ping();
-	}
 </script>
 
 <div class="connection-status">
@@ -34,22 +30,6 @@
 		<span class="dot {statusClass}"></span>
 		<span class="label">{statusLabel}</span>
 	</div>
-
-	<div class="row">
-		<button on:click={sendPing} disabled={$connectionStore.status !== 'open'}>
-			Send Ping
-		</button>
-		{#if $connectionStore.latencyMs !== null}
-			<span class="latency">{Math.round($connectionStore.latencyMs)} ms</span>
-		{/if}
-	</div>
-
-	{#if $connectionStore.lastMessage !== null}
-		<div class="row echo">
-			<span class="echo-label">Last message:</span>
-			<code>{$connectionStore.lastMessage}</code>
-		</div>
-	{/if}
 
 	{#if $connectionStore.reconnectAttempts > 0}
 		<div class="row reconnects">Reconnect attempts: {$connectionStore.reconnectAttempts}</div>
@@ -87,14 +67,6 @@
 
 	.dot.warn {
 		background: #e0a020;
-	}
-
-	.latency {
-		color: #888;
-	}
-
-	.echo code {
-		word-break: break-all;
 	}
 
 	.reconnects {

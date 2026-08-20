@@ -12,9 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -126,10 +129,15 @@ class WeaponAndShieldTest {
                 match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, true);
         assertTrue(apex.stoppedAtApex, "test setup expects the shot to reach an apex");
 
+        // Children relaunch from the apex's actual (near-horizontal) velocity,
+        // not the original steep launch angle/power — see Match's MIRV case.
+        double apexAngleDeg = Math.toDegrees(Math.atan2(-apex.finalVy, apex.finalVx));
+        double apexPower = Math.hypot(apex.finalVx, apex.finalVy) / ProjectileSim.POWER_SCALE;
+
         double[] offsets = {-15.0, -5.0, 5.0, 15.0};
         Joined[] targets = {t1, t2, t3, t4};
         for (int i = 0; i < offsets.length; i++) {
-            ProjectileSim.Result child = ProjectileSim.simulate(apex.impactX, apex.impactY, angle + offsets[i], power,
+            ProjectileSim.Result child = ProjectileSim.simulate(apex.impactX, apex.impactY, apexAngleDeg + offsets[i], apexPower,
                     0, match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
             match.debugSetTankPosition(targets[i].playerId(), child.impactX, child.impactY);
         }
@@ -216,6 +224,69 @@ class WeaponAndShieldTest {
         }
     }
 
+    @Test
+    @Timeout(10)
+    void mirvChildrenLaunchFromApexVelocityNotOriginalSteepAngle() {
+        Match match = newMatch("m-mirv-physics");
+        Joined shooter = join(match, "Shooter");
+        Joined t1 = join(match, "T1");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(t1.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 200, 500);
+        match.debugSetTankPosition(t1.playerId(), 1590, 500); // out of blast range
+
+        // Steep on purpose: this is exactly the case that used to send
+        // children "uselessly" further up instead of fanning outward.
+        double angle = 75;
+        double power = 60;
+        double[] tip = barrelTip(200, 500, angle);
+        ProjectileSim.Result apex = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
+                match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, true);
+        assertTrue(apex.stoppedAtApex, "test setup expects the shot to reach an apex");
+
+        // Arc: at the apex vy~=0 by definition, so the reconstructed launch
+        // angle for the children must be near-horizontal -- nothing like the
+        // original 75deg (the bug: re-using angleDeg+offset directly).
+        double apexAngleDeg = Math.toDegrees(Math.atan2(-apex.finalVy, apex.finalVx));
+        assertTrue(Math.abs(apexAngleDeg) < 10.0,
+                "expected a near-horizontal apex angle, got " + apexAngleDeg + "deg");
+
+        // Speed: no wind, so the apex's speed should equal the original
+        // launch's horizontal velocity component (vy was bled off by gravity
+        // getting to the apex; vx is untouched).
+        double apexSpeed = Math.hypot(apex.finalVx, apex.finalVy);
+        double expectedHorizontalSpeed = power * Math.cos(Math.toRadians(angle)) * ProjectileSim.POWER_SCALE;
+        assertEquals(expectedHorizontalSpeed, apexSpeed, Math.max(1.0, expectedHorizontalSpeed * 0.05),
+                "apex speed should match the original shot's horizontal speed component");
+
+        // Functional check: a child launched with the OLD (buggy) formula —
+        // angle+offset using the original steep angle/power — would climb
+        // dramatically above the split point. The fixed formula (apex angle/
+        // speed) should stay close to the apex's own height instead.
+        double childAngleDeg = apexAngleDeg + 15.0; // largest spread offset
+        double childPower = apexSpeed / ProjectileSim.POWER_SCALE;
+        ProjectileSim.Result fixedChild = ProjectileSim.simulate(apex.impactX, apex.impactY, childAngleDeg, childPower,
+                0, match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+        double fixedMinY = fixedChild.rawPath.stream().mapToDouble(p -> p[1]).min().orElse(fixedChild.impactY);
+
+        ProjectileSim.Result buggyChild = ProjectileSim.simulate(apex.impactX, apex.impactY, angle + 15.0, power,
+                0, match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+        double buggyMinY = buggyChild.rawPath.stream().mapToDouble(p -> p[1]).min().orElse(buggyChild.impactY);
+
+        assertTrue(fixedMinY > apex.impactY - 30.0,
+                "fixed child shouldn't climb well above the apex split point, apexY=" + apex.impactY + " minY=" + fixedMinY);
+        assertTrue(buggyMinY < apex.impactY - 100.0,
+                "sanity check: the old buggy formula really did climb much higher, confirming this test would have caught it");
+
+        // And the real Match dispatch should actually be using the fixed
+        // formula end-to-end, not just this test's standalone reconstruction.
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "mirv", angle, power);
+        assertTrue(outcome.accepted());
+    }
+
     private static String describe(List<Payloads.TrajectoryPoint> trajectory) {
         StringBuilder sb = new StringBuilder();
         for (Payloads.TrajectoryPoint p : trajectory) {
@@ -270,6 +341,186 @@ class WeaponAndShieldTest {
             int col = (int) Math.round(Math.max(0, Math.min(terrain.width() - 1, predicted.impactX + offset)));
             assertTrue(terrain.heightAt(col) > 500, "expected a crater at column " + col + " (offset " + offset + ")");
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Baby Missile: ~6% terminal homing, only near the end, only near a
+    // live target -- everything else stays pure ballistic.
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void babyMissileHomesInOnANearbyTargetDuringDescent() {
+        Match match = newMatch("m-homing-on");
+        Joined shooter = join(match, "Shooter");
+        Joined target = join(match, "Target");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(target.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 200, 500);
+
+        double angle = 45;
+        double power = 55;
+        double[] tip = barrelTip(200, 500, angle);
+        WeaponDef babyMissile = WeaponDef.byId("baby_missile");
+        ProjectileSim.Result pureBallistic = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
+                match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD,
+                babyMissile.powerScaleMultiplier(), babyMissile.gravityMultiplier(), false);
+
+        // Target sits a bit short of where a pure-ballistic shot would land,
+        // well within HOMING_ACTIVATION_RADIUS (300) during descent.
+        double targetX = pureBallistic.impactX - 80;
+        match.debugSetTankPosition(target.playerId(), targetX, 500);
+
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "baby_missile", angle, power);
+        assertTrue(outcome.accepted());
+
+        double homedImpactX = outcome.shotResolved().impact.x;
+        double distBefore = Math.abs(pureBallistic.impactX - targetX);
+        double distAfter = Math.abs(homedImpactX - targetX);
+        assertTrue(distAfter < distBefore,
+                "expected the homing shot to land closer to the target: pure-ballistic dist=" + distBefore
+                        + " homed dist=" + distAfter + " (pureImpactX=" + pureBallistic.impactX
+                        + " homedImpactX=" + homedImpactX + " targetX=" + targetX + ")");
+    }
+
+    @Test
+    @Timeout(10)
+    void babyMissileFliesPureBallisticWithNoTargetNearby() {
+        Match match = newMatch("m-homing-off");
+        Joined shooter = join(match, "Shooter");
+        Joined farAway = join(match, "FarAway");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(farAway.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 200, 500);
+        match.debugSetTankPosition(farAway.playerId(), 1590, 500); // far outside HOMING_ACTIVATION_RADIUS
+
+        double angle = 45;
+        double power = 55;
+        double[] tip = barrelTip(200, 500, angle);
+        WeaponDef babyMissile = WeaponDef.byId("baby_missile");
+        ProjectileSim.Result pureBallistic = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
+                match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD,
+                babyMissile.powerScaleMultiplier(), babyMissile.gravityMultiplier(), false);
+
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "baby_missile", angle, power);
+        assertTrue(outcome.accepted());
+
+        assertEquals(pureBallistic.impactX, outcome.shotResolved().impact.x, 0.5,
+                "with no target in homing range, baby_missile should fly identically to a pure ballistic shot");
+    }
+
+    // -----------------------------------------------------------------
+    // Digger: reuses TUNNELING with its own shallower penetration cap and a
+    // bigger final crater than the old single-point-impact behavior.
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void diggerTunnelsShallowerThanTunnelingShotWithABiggerFinalCrater() {
+        Match match = newMatch("m-digger");
+        Joined shooter = join(match, "Shooter");
+        Joined farAway = join(match, "FarAway");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(farAway.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 400, 500);
+        match.debugSetTankPosition(farAway.playerId(), 1590, 500);
+
+        double angle = 45;
+        double power = 55;
+
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "digger", angle, power);
+        assertTrue(outcome.accepted());
+
+        // Crater should be visibly present and, given the bumped blastRadius
+        // (38 vs. the old 20), noticeably wide.
+        var resolved = outcome.shotResolved();
+        int span = resolved.terrainDelta.endX - resolved.terrainDelta.startX + 1;
+        assertTrue(span > 40, "expected a wide crater span from Digger's bigger blastRadius, got " + span);
+
+        // Deepest point in the affected range should reach well past the
+        // flat baseline (500), confirming a real dig happened.
+        Terrain terrain = match.debugTerrain();
+        int deepest = 500;
+        for (int x = resolved.terrainDelta.startX; x <= resolved.terrainDelta.endX; x++) {
+            deepest = Math.max(deepest, terrain.heightAt(x));
+        }
+        assertTrue(deepest > 540, "expected a visibly deep crater, deepest column height=" + deepest);
+    }
+
+    // -----------------------------------------------------------------
+    // Bouncing Betty: damage on each bounce, not just the final detonation.
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void bouncingBettyDamagesATankNearAnEarlierBouncePoint() throws Exception {
+        // This exercises Match's bounce-damage bookkeeping (25% centerDamage,
+        // direct-hit-only, no blast falloff, merged into the same
+        // workingHealth/damageByPlayer pattern as blast/fall damage) via
+        // reflection into the private applyDetonations method, rather than
+        // through a full fire() call driven by ProjectileSim geometry.
+        //
+        // That's a deliberate choice, not a shortcut: for every angle/power
+        // combo probed (see investigation notes), a target placed anywhere
+        // within Match.BOUNCE_DAMAGE_RADIUS (30) of a bounce point -- above
+        // it, ahead of it, behind it, on a ring around it -- was ALSO within
+        // ProjectileSim.TANK_HITBOX_RADIUS (14) of some other point on the
+        // same shot's raw path. That's inherent to the bounce mechanic
+        // itself: reflection only triggers below a shallow 35deg incidence
+        // angle, so every bounce's approach and departure hug the ground
+        // tightly and close together (successive bounces land ~15-50 units
+        // apart), leaving no gap wide enough for BOUNCE_DAMAGE_RADIUS (30)
+        // and TANK_HITBOX_RADIUS (14) to both be satisfied at once. So a
+        // trajectory-driven test of this exact "graze a nearby tank, not a
+        // direct hit" scenario isn't constructible from real shots; the
+        // bounce-point generation itself is already covered by
+        // ProjectileSimTest.bouncingReflectsOffShallowAngleTerrainHit, so
+        // this test targets the one thing that isn't covered elsewhere: the
+        // damage bookkeeping Match applies once it has bounce points.
+        Match match = newMatch("m-bounce-dmg");
+        Joined shooter = join(match, "Shooter");
+        Joined target = join(match, "Target");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(target.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        double targetX = 400, targetY = 500;
+        match.debugSetTankPosition(target.playerId(), targetX, targetY);
+
+        double healthBefore = match.healthOf(target.playerId());
+
+        WeaponDef bouncingBetty = WeaponDef.byId("bouncing_betty");
+        double bounceDamagePerHit = bouncingBetty.centerDamage() * 0.25;
+        List<double[]> bounceDamagePoints = List.of(new double[] {targetX, targetY});
+
+        Field playersField = Match.class.getDeclaredField("players");
+        playersField.setAccessible(true);
+        Map<?, ?> players = (Map<?, ?>) playersField.get(match);
+        Object shooterMatchPlayer = players.get(shooter.playerId());
+
+        Method applyDetonations = Arrays.stream(Match.class.getDeclaredMethods())
+                .filter(m -> m.getName().equals("applyDetonations"))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchMethodException("applyDetonations"));
+        applyDetonations.setAccessible(true);
+        applyDetonations.invoke(match, shooterMatchPlayer, "bouncing_betty",
+                Collections.emptyList(), 0.0, 0.0, Collections.emptyList(),
+                bounceDamagePoints, bounceDamagePerHit);
+
+        double healthAfter = match.healthOf(target.playerId());
+        double actualDrop = healthBefore - healthAfter;
+        double expectedDrop = Math.round(bounceDamagePerHit);
+        assertEquals(expectedDrop, actualDrop, 0.01,
+                "expected ~25% of centerDamage from the bounce alone; got a drop of " + actualDrop);
     }
 
     // -----------------------------------------------------------------

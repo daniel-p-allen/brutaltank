@@ -221,6 +221,32 @@ class MatchTurnStateMachineTest {
 
     @Test
     @Timeout(10)
+    void aimUpdateBroadcastsToEveryoneRegardlessOfWhoseTurnItIs() {
+        Match match = newMatch("m-turn-aim", 4, 8);
+        match.setTurnTimeoutMs(30_000);
+        Joined p1 = join(match, "P1");
+        Joined p2 = join(match, "P2");
+        match.setReady(p1.playerId(), true);
+        match.setReady(p2.playerId(), true);
+
+        // p2 is not the active player, but per user feedback aim updates
+        // aren't turn-gated -- anyone can play with their aim at any time.
+        assertEquals(p1.playerId(), match.activePlayerId());
+        match.updateAim(p2.playerId(), 77.0);
+
+        var aiming = p1.sink().lastPayloadOfType("PlayerAiming");
+        assertNotNull(aiming);
+        assertEquals(p2.playerId(), aiming.get("playerId").asText());
+        assertEquals(77.0, aiming.get("angleDeg").asDouble(), 0.001);
+
+        // The sender's own client also receives the broadcast (harmless --
+        // it already has the value locally, but the relay is uniform).
+        var aimingOnSender = p2.sink().lastPayloadOfType("PlayerAiming");
+        assertNotNull(aimingOnSender);
+    }
+
+    @Test
+    @Timeout(10)
     void turnTimeoutAutoSkipsWithoutFiringAndAdvancesTurn() {
         Match match = newMatch("m-turn-7", 4, 8);
         match.setTurnTimeoutMs(150);

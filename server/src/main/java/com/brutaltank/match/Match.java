@@ -451,6 +451,20 @@ public final class Match {
         resolveTurnAdvance(null, null); // timeout skip: no shot, just advance
     }
 
+    /**
+     * Relays a live aim-angle update to every connected client (cosmetic
+     * only — see {@link Payloads.AimUpdate}). Not turn-gated: any player can
+     * play with their aim slider at any time and have their barrel track it
+     * on everyone's screen, per user feedback.
+     */
+    public synchronized void updateAim(String playerId, double angleDeg) {
+        MatchPlayer mp = players.get(playerId);
+        if (mp == null || mp.departed) {
+            return;
+        }
+        broadcast("PlayerAiming", new Payloads.PlayerAiming(playerId, angleDeg));
+    }
+
     public synchronized FireOutcome fire(String playerId, String requestId, String weaponId, double angleDeg, double power) {
         if (status != Status.IN_PROGRESS) {
             return FireOutcome.rejected("MATCH_NOT_IN_PROGRESS");
@@ -502,8 +516,35 @@ public final class Match {
         turnsThisRound++;
 
         List<String> aliveIds = aliveNonDepartedIds();
+        // A disconnected (but not yet past the full reconnect-grace period,
+        // so still counted "alive/non-departed") player's turn always ends
+        // in an auto-skip lapse (resolved == null), never a Fire. So if a
+        // lapse just happened and at most one of the remaining alive players
+        // is actually still connected, the game is effectively over — per
+        // user feedback, end it now rather than making the sole connected
+        // player wait out everyone else's full ~120s grace period one at a
+        // time. Only checked on a lapse, not a normal Fire, so a brief
+        // reconnect blip doesn't instantly end an otherwise-live round.
+        List<String> connectedAliveIds = aliveIds.stream()
+                .filter(id -> {
+                    MatchPlayer p = players.get(id);
+                    return p != null && p.connected;
+                })
+                .toList();
+        boolean lastConnectedPlayerStanding = resolved == null && aliveIds.size() > 1
+                && connectedAliveIds.size() <= 1;
+
         if (aliveIds.size() <= 1 || turnsThisRound >= MAX_TURNS_PER_ROUND) {
             endRound(aliveIds);
+            return;
+        }
+        if (lastConnectedPlayerStanding) {
+            // Award the round to the sole connected survivor specifically
+            // (not "whoever has the most HP among aliveIds", which could be
+            // a disconnected tank that just never took damage) — disconnected
+            // players who effectively forfeited don't get the round-survival
+            // cash bonus either, only whoever actually saw it through.
+            endRound(connectedAliveIds);
             return;
         }
 
@@ -737,9 +778,27 @@ public final class Match {
     // Cosmetic, zero-damage detonations that give Tunneling/Bouncing a
     // visible terrain track (a bore shaft, a line of skip marks) instead of
     // just the one final crater every other STANDARD-shaped weapon leaves.
-    private static final int TUNNEL_TRACK_MARKS = 3;
     private static final double TUNNEL_TRACK_RADIUS = 10.0;
     private static final double BOUNCE_SKIP_MARK_RADIUS = 8.0;
+    // Digger reuses Tunneling Shot's TUNNELING behavior (see WeaponDef.DIGGER)
+    // but with its own much shallower penetration depth (vs.
+    // ProjectileSim.TUNNELING_MAX_PENETRATION's 160) so it reads as a short
+    // bore-then-big-crater rather than a long tunnel.
+    private static final double DIGGER_MAX_PENETRATION = 70.0;
+    // Fraction of Bouncing Betty's centerDamage dealt at each bounce point to
+    // any tank within BOUNCE_DAMAGE_RADIUS (per user feedback: "make it
+    // bounce, damage on bounce"). No blast-radius falloff — a bounce is a
+    // glancing hit, not a detonation.
+    private static final double BOUNCE_DAMAGE_FRACTION = 0.25;
+    // Deliberately wider than ProjectileSim.TANK_HITBOX_RADIUS (14): a tank
+    // within that tighter radius would already have been caught by
+    // ProjectileSim's own per-step tank-hit check *during* the simulation,
+    // terminating the shot as a normal direct hit before a bounce there was
+    // ever recorded — so bouncePoints can never legitimately contain a point
+    // within 14 units of a live tank. Using the same radius here would make
+    // this whole mechanic unreachable dead code; a wider "clipped by the
+    // bounce, not squarely hit" radius is a genuinely different case.
+    private static final double BOUNCE_DAMAGE_RADIUS = 30.0;
 
     // Tank-fall tuning (PLAN.md-adjacent, per live-playtest feedback): a
     // tank whose column's ground drops out from under it (crater, gully, or
@@ -786,28 +845,35 @@ public final class Match {
 
         List<double[]> mergedTrajectory = new ArrayList<>();
         List<DetonationSpec> detonations = new ArrayList<>();
+        // Only populated by the BOUNCING case: direct-hit-only damage points
+        // (no blast falloff) for a tank actually skipped over mid-flight.
+        List<double[]> bounceDamagePoints = List.of();
+        double bounceDamagePerHit = 0.0;
         double impactX;
         double impactY;
 
         switch (weapon.behavior()) {
             case TUNNELING -> {
+                // Digger reuses this same behavior (see WeaponDef.DIGGER) with
+                // its own shallower penetration cap instead of Tunneling
+                // Shot's — everything else about the dispatch is identical.
+                double maxPenetration = "digger".equals(weaponId)
+                        ? DIGGER_MAX_PENETRATION : ProjectileSim.TUNNELING_MAX_PENETRATION;
                 ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
                         windStrength, terrain, targets, WeaponDef.Behavior.TUNNELING,
-                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false,
+                        maxPenetration, weapon.homingStrength());
                 mergedTrajectory.addAll(sim.resampledTrajectory);
-                // Bore track: a few small, shallow, zero-damage marks linearly
-                // interpolated from where the shot first penetrated the ground
-                // down to its final detonation point, so the tunnel is visibly
-                // carved rather than leaving just a single detached crater.
-                if (!Double.isNaN(sim.tunnelEntryX)) {
-                    for (int i = 1; i <= TUNNEL_TRACK_MARKS; i++) {
-                        double t = (double) i / (TUNNEL_TRACK_MARKS + 1);
-                        double markX = sim.tunnelEntryX + (sim.impactX - sim.tunnelEntryX) * t;
-                        double markY = sim.tunnelEntryY + (sim.impactY - sim.tunnelEntryY) * t;
-                        detonations.add(new DetonationSpec(markX, markY, TUNNEL_TRACK_RADIUS, 0));
-                    }
+                // Bore track: a small, shallow, zero-damage crater at every
+                // step of the shot's actual underground path (not a few
+                // dots interpolated between entry/exit), so the tunnel
+                // visibly follows the real curved trajectory instead of
+                // reading as nothing at all next to the final crater.
+                for (double[] point : sim.undergroundPath) {
+                    detonations.add(new DetonationSpec(point[0], point[1], TUNNEL_TRACK_RADIUS, 0));
                 }
-                detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
+                detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage(),
+                        weapon.craterDepthMultiplier()));
                 impactX = sim.impactX;
                 impactY = sim.impactY;
             }
@@ -817,10 +883,18 @@ public final class Match {
                         weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
                 mergedTrajectory.addAll(sim.resampledTrajectory);
                 // Skip marks: a small, shallow, zero-damage ding at each bounce
-                // point before the final detonation, like a skipped stone.
+                // point before the final detonation, like a skipped stone —
+                // plus (per user feedback: "make it bounce, damage on bounce")
+                // a direct-hit-only damage check against any tank actually
+                // skipped over, applied below via applyDetonations so it merges
+                // into the same health/DamageEvent bookkeeping as everything
+                // else in this shot. The bounce sequence doesn't stop early on
+                // a hit — every bounce still happens regardless.
                 for (double[] bp : sim.bouncePoints) {
                     detonations.add(new DetonationSpec(bp[0], bp[1], BOUNCE_SKIP_MARK_RADIUS, 0));
                 }
+                bounceDamagePoints = sim.bouncePoints;
+                bounceDamagePerHit = weapon.centerDamage() * BOUNCE_DAMAGE_FRACTION;
                 detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
                 impactX = sim.impactX;
                 impactY = sim.impactY;
@@ -828,10 +902,16 @@ public final class Match {
             case MIRV -> {
                 // Simplification (see class notes / report): find the apex via a
                 // STANDARD-shaped simulate() call with stopAtApex=true, then re-simulate
-                // 4 children from that point at +/-5/15 degree spread, same power. If the
-                // shot hits something before ever reaching an apex (e.g. a very steep,
-                // short, near-point-blank shot), it detonates as a single non-split blast
-                // using the per-child stats rather than splitting mid-flight.
+                // 4 children from that point at +/-5/15 degree spread around the actual
+                // apex velocity direction (near-horizontal, since vy~=0 at the apex by
+                // definition) — NOT the original launch angle. Re-using the original
+                // angle here was a bug: for any shot steeper than ~horizontal, children
+                // would rocket further upward off the split point instead of fanning
+                // outward and immediately arcing down, which reads as "the MIRV fires
+                // uselessly straight up". If the shot hits something before ever
+                // reaching an apex (e.g. a very steep, short, near-point-blank shot),
+                // it detonates as a single non-split blast using the per-child stats
+                // rather than splitting mid-flight.
                 ProjectileSim.Result apexSim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
                         windStrength, terrain, targets, WeaponDef.Behavior.STANDARD,
                         weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), true);
@@ -851,9 +931,15 @@ public final class Match {
                     // Craters/damage from every child still land correctly
                     // via detonations below; only the animated flight path
                     // is limited to the one shared, non-rewinding leg.
+                    // Reconstruct an equivalent angle/power pair from the apex's actual
+                    // velocity so each child continues from where the parent really was
+                    // heading (near-horizontal), not from the original steep launch angle.
+                    double apexAngleDeg = Math.toDegrees(Math.atan2(-apexSim.finalVy, apexSim.finalVx));
+                    double apexSpeed = Math.hypot(apexSim.finalVx, apexSim.finalVy);
+                    double apexPower = apexSpeed / ProjectileSim.POWER_SCALE;
                     for (double offset : MIRV_SPREAD_OFFSETS_DEG) {
                         ProjectileSim.Result child = ProjectileSim.simulate(
-                                apexSim.impactX, apexSim.impactY, angleDeg + offset, clampedPower,
+                                apexSim.impactX, apexSim.impactY, apexAngleDeg + offset, apexPower,
                                 windStrength, terrain, targets, WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
                         detonations.add(new DetonationSpec(child.impactX, child.impactY, weapon.blastRadius(), weapon.centerDamage()));
                     }
@@ -883,10 +969,11 @@ public final class Match {
                     detonations.add(new DetonationSpec(bombletX, bombletY, weapon.bombletBlastRadius(), weapon.centerDamage()));
                 }
             }
-            default -> { // STANDARD, DIGGER
+            default -> { // STANDARD (DIGGER now dispatches via TUNNELING above)
                 ProjectileSim.Result sim = ProjectileSim.simulate(startX, startY, angleDeg, clampedPower,
                         windStrength, terrain, targets, WeaponDef.Behavior.STANDARD,
-                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
+                        weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false,
+                        ProjectileSim.TUNNELING_MAX_PENETRATION, weapon.homingStrength());
                 mergedTrajectory.addAll(sim.resampledTrajectory);
                 detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage(),
                         weapon.craterDepthMultiplier()));
@@ -895,7 +982,8 @@ public final class Match {
             }
         }
 
-        return applyDetonations(shooter, weaponId, mergedTrajectory, impactX, impactY, detonations);
+        return applyDetonations(shooter, weaponId, mergedTrajectory, impactX, impactY, detonations,
+                bounceDamagePoints, bounceDamagePerHit);
     }
 
     /**
@@ -930,6 +1018,8 @@ public final class Match {
         resolved.damageEvents = new ArrayList<>();
         resolved.cashEarned = new ArrayList<>();
         resolved.tankFalls = new ArrayList<>();
+        resolved.ammoRemaining = shooter.player.loadout.getOrDefault(shieldId, -1);
+        resolved.allImpacts = List.of(resolved.impact);
         return resolved;
     }
 
@@ -942,7 +1032,8 @@ public final class Match {
      */
     private Payloads.ShotResolved applyDetonations(MatchPlayer shooter, String weaponId,
                                                      List<double[]> trajectory, double impactX, double impactY,
-                                                     List<DetonationSpec> detonations) {
+                                                     List<DetonationSpec> detonations,
+                                                     List<double[]> bounceDamagePoints, double bounceDamagePerHit) {
         Map<String, Double> workingHealth = new LinkedHashMap<>();
         for (MatchPlayer p : players.values()) {
             if (!p.departed && p.player.tank.alive) {
@@ -955,6 +1046,37 @@ public final class Match {
         int cashFromDamage = 0;
         int minStart = Integer.MAX_VALUE;
         int maxEnd = Integer.MIN_VALUE;
+
+        // Bouncing Betty: direct-hit-only damage at each bounce point (no
+        // blast-radius falloff — a bounce is a glancing hit, not a real
+        // detonation), applied before the normal detonations loop below so
+        // it merges into the same workingHealth/damageByPlayer bookkeeping
+        // as the final blast (one consistent DamageEvent per tank, not two
+        // conflicting ones).
+        for (double[] bp : bounceDamagePoints) {
+            for (MatchPlayer p : players.values()) {
+                Double hp = workingHealth.get(p.player.playerId);
+                if (hp == null || hp <= 0.0) {
+                    continue;
+                }
+                if (distance(p.player.tank.x, p.player.tank.y, bp[0], bp[1]) > BOUNCE_DAMAGE_RADIUS) {
+                    continue;
+                }
+                double mitigatedDamage = applyShieldMitigation(p, bounceDamagePerHit, true, cashEarned);
+                double newHealth = Math.max(0.0, Math.round(hp - mitigatedDamage));
+                boolean eliminated = newHealth <= 0.0;
+                workingHealth.put(p.player.playerId, newHealth);
+
+                Payloads.DamageEvent existing = damageByPlayer.get(p.player.playerId);
+                double cumulativeDamage = (existing != null ? existing.damage : 0.0) + mitigatedDamage;
+                damageByPlayer.put(p.player.playerId,
+                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated));
+
+                if (!p.player.playerId.equals(shooter.player.playerId)) {
+                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
+                }
+            }
+        }
 
         for (DetonationSpec d : detonations) {
             Terrain.CraterResult crater = terrain.applyCrater(
@@ -1087,6 +1209,23 @@ public final class Match {
         resolved.damageEvents = damageEvents;
         resolved.cashEarned = cashEarned;
         resolved.tankFalls = tankFalls;
+        resolved.ammoRemaining = shooter.player.loadout.getOrDefault(weaponId, -1);
+        // Every real (damage-capable) detonation, so the client can flash an
+        // explosion at each one — not just the shared `impact` point, which
+        // for MIRV/Cluster Bomb is only the split point / primary hit while
+        // the children/bomblets actually land (and crater) elsewhere.
+        // Cosmetic zero-damage marks (tunnel bore track, bounce skip marks)
+        // are excluded; those already read as a trail, not explosions.
+        List<Payloads.Impact> allImpacts = new ArrayList<>();
+        for (DetonationSpec d : detonations) {
+            if (d.centerDamage() > 0) {
+                allImpacts.add(new Payloads.Impact(d.x(), d.y()));
+            }
+        }
+        if (allImpacts.isEmpty()) {
+            allImpacts.add(resolved.impact);
+        }
+        resolved.allImpacts = allImpacts;
         return resolved;
     }
 

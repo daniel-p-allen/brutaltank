@@ -135,6 +135,7 @@ public final class BrutalTankServer {
                 case "LeaveMatch" -> lobbyManager.handleLeaveMatch(session);
                 case "Fire" -> handleFire(session, sink, envelope, payloadNode);
                 case "ShopPurchase" -> handleShopPurchase(session, sink, envelope, payloadNode);
+                case "AimUpdate" -> handleAimUpdate(session, payloadNode);
                 default -> LOG.fine("Ignoring unhandled message type: " + envelope.type);
             }
         } catch (Exception e) {
@@ -194,6 +195,18 @@ public final class BrutalTankServer {
         }
         // On success, Match.purchase() has already broadcast ShopUpdate to
         // every connected player itself (see handleFire's identical note).
+    }
+
+    private void handleAimUpdate(PlayerSession session, JsonNode payloadNode) throws Exception {
+        if (session.currentMatchId == null || session.playerId == null) {
+            return;
+        }
+        Match match = matchRegistry.get(session.currentMatchId);
+        if (match == null) {
+            return;
+        }
+        Payloads.AimUpdate aimUpdate = mapper.treeToValue(payloadNode, Payloads.AimUpdate.class);
+        match.updateAim(session.playerId, aimUpdate.angleDeg);
     }
 
     private static String shopRejectionMessage(String reason) {

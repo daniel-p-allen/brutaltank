@@ -113,7 +113,11 @@ class ProjectileSimTest {
         assertTrue(tunneling.impactY > standard.impactY,
                 "tunneling should penetrate deeper: standard=" + standard.impactY + " tunneling=" + tunneling.impactY);
         double penetration = tunneling.impactY - standard.impactY;
-        assertTrue(penetration > 15.0 && penetration <= ProjectileSim.TUNNELING_MAX_PENETRATION + 5.0,
+        // Tolerance is generous (not +5) because discretized stepping can
+        // overshoot the cap by a whole step's vy*DT, and vy underground at
+        // TUNNELING_MAX_PENETRATION=160 is large enough for that overshoot
+        // to be tens of units, not a handful.
+        assertTrue(penetration > 15.0 && penetration <= ProjectileSim.TUNNELING_MAX_PENETRATION + 30.0,
                 "unexpected penetration depth: " + penetration);
     }
 

@@ -40,7 +40,18 @@ public final class ProjectileSim {
     public static final double TANK_HITBOX_RADIUS = 14.0;
     public static final int RESAMPLE_POINTS = 36;
 
-    public static final double TUNNELING_MAX_PENETRATION = 40.0;
+    // Baby Missile terminal homing (user feedback: "a little bit of homing
+    // just in the end, 6%"): only kicks in once descending (past apex) and
+    // only once a live target is within this many world-units, so long
+    // misses are unaffected and it reads as a small last-moment correction
+    // rather than a lock-on.
+    public static final double HOMING_ACTIVATION_RADIUS = 300.0;
+
+    // Was 40 — too shallow to read as a distinct tunnel once the final,
+    // wider detonation crater sits right next to it (per user feedback: "I
+    // see no tunnel... what I see is nothing"). 160 gives real elongated
+    // travel underground before the final explosion.
+    public static final double TUNNELING_MAX_PENETRATION = 160.0;
     public static final int BOUNCING_MAX_BOUNCES = 3;
     public static final double BOUNCING_ENERGY_RETENTION = 0.6;
     public static final double BOUNCING_SHALLOW_ANGLE_DEG = 35.0;
@@ -82,11 +93,22 @@ public final class ProjectileSim {
          * "skip mark" at each one, distinct from the final detonation.
          */
         public final List<double[]> bouncePoints;
+        /**
+         * Every {@code (x, y)} step while "underground" (TUNNELING only,
+         * between {@link #tunnelEntryX}/{@link #tunnelEntryY} and the final
+         * impact; empty otherwise) — the shot keeps accelerating under
+         * gravity/wind while tunneling, so this is a real curved path, not a
+         * straight line between entry and exit. Lets {@code Match} carve a
+         * trench that actually follows the trajectory instead of a few
+         * sparse interpolated dots.
+         */
+        public final List<double[]> undergroundPath;
 
         Result(List<double[]> rawPath, List<double[]> resampledTrajectory,
                double impactX, double impactY, String hitPlayerId,
                boolean stoppedAtApex, double finalVx, double finalVy, int bounceCount,
-               double tunnelEntryX, double tunnelEntryY, List<double[]> bouncePoints) {
+               double tunnelEntryX, double tunnelEntryY, List<double[]> bouncePoints,
+               List<double[]> undergroundPath) {
             this.rawPath = rawPath;
             this.resampledTrajectory = resampledTrajectory;
             this.impactX = impactX;
@@ -99,6 +121,7 @@ public final class ProjectileSim {
             this.tunnelEntryX = tunnelEntryX;
             this.tunnelEntryY = tunnelEntryY;
             this.bouncePoints = bouncePoints;
+            this.undergroundPath = undergroundPath;
         }
     }
 
@@ -111,6 +134,8 @@ public final class ProjectileSim {
 
     /**
      * Full entry point used by weapon-specific dispatch in {@code Match}.
+     * Delegates to the full overload with no homing and the standard
+     * tunneling depth cap.
      *
      * @param behavior              drives TUNNELING/BOUNCING in-flight handling; MIRV/CLUSTER/DIGGER
      *                              are resolved by the caller around a STANDARD-shaped simulation
@@ -123,6 +148,28 @@ public final class ProjectileSim {
                                    int windStrength, Terrain terrain, List<TankTarget> targets,
                                    WeaponDef.Behavior behavior, double powerScaleMultiplier,
                                    double gravityMultiplier, boolean stopAtApex) {
+        return simulate(startX, startY, angleDeg, power, windStrength, terrain, targets,
+                behavior, powerScaleMultiplier, gravityMultiplier, stopAtApex,
+                TUNNELING_MAX_PENETRATION, 0.0);
+    }
+
+    /**
+     * Full entry point with per-weapon tunneling depth and terminal homing.
+     *
+     * @param maxPenetration  TUNNELING-only: cumulative underground depth before detonating
+     *                        (Tunneling Shot uses {@link #TUNNELING_MAX_PENETRATION}; Digger
+     *                        uses its own shallower cap — see {@code Match}).
+     * @param homingStrength  0.0 for pure ballistic (every weapon but Baby Missile). Above
+     *                        0, once descending (past apex) and within
+     *                        {@link #HOMING_ACTIVATION_RADIUS} of a live target, blends the
+     *                        velocity DIRECTION (speed unchanged) toward that target by this
+     *                        fraction per simulation step.
+     */
+    public static Result simulate(double startX, double startY, double angleDeg, double power,
+                                   int windStrength, Terrain terrain, List<TankTarget> targets,
+                                   WeaponDef.Behavior behavior, double powerScaleMultiplier,
+                                   double gravityMultiplier, boolean stopAtApex,
+                                   double maxPenetration, double homingStrength) {
         double angleRad = Math.toRadians(angleDeg);
         double vx = power * Math.cos(angleRad) * POWER_SCALE * powerScaleMultiplier;
         double vy = -power * Math.sin(angleRad) * POWER_SCALE * powerScaleMultiplier;
@@ -144,6 +191,7 @@ public final class ProjectileSim {
         double penetrationEntryY = 0;
         int bounceCount = 0;
         List<double[]> bouncePoints = new ArrayList<>();
+        List<double[]> undergroundPath = new ArrayList<>();
 
         for (int step = 0; step < MAX_STEPS; step++) {
             double vyBefore = vy;
@@ -154,6 +202,40 @@ public final class ProjectileSim {
                 terminated = true;
                 apexHit = true;
                 break;
+            }
+
+            // Terminal homing (Baby Missile): only once descending, only
+            // near a live target, only rotates the velocity direction —
+            // speed/magnitude is preserved.
+            if (homingStrength > 0.0 && vy >= 0 && !targets.isEmpty()) {
+                TankTarget nearest = null;
+                double nearestDistSq = Double.MAX_VALUE;
+                for (TankTarget t : targets) {
+                    double dx = t.x() - x;
+                    double dy = t.y() - y;
+                    double distSq = dx * dx + dy * dy;
+                    if (distSq < nearestDistSq) {
+                        nearestDistSq = distSq;
+                        nearest = t;
+                    }
+                }
+                if (nearest != null && nearestDistSq <= HOMING_ACTIVATION_RADIUS * HOMING_ACTIVATION_RADIUS) {
+                    double speed = Math.hypot(vx, vy);
+                    double distToTarget = Math.sqrt(nearestDistSq);
+                    if (speed > 1e-6 && distToTarget > 1e-6) {
+                        double dirX = vx / speed;
+                        double dirY = vy / speed;
+                        double targetDirX = (nearest.x() - x) / distToTarget;
+                        double targetDirY = (nearest.y() - y) / distToTarget;
+                        double blendedX = dirX * (1 - homingStrength) + targetDirX * homingStrength;
+                        double blendedY = dirY * (1 - homingStrength) + targetDirY * homingStrength;
+                        double blendedLen = Math.hypot(blendedX, blendedY);
+                        if (blendedLen > 1e-6) {
+                            vx = (blendedX / blendedLen) * speed;
+                            vy = (blendedY / blendedLen) * speed;
+                        }
+                    }
+                }
             }
 
             x += vx * DT;
@@ -177,7 +259,8 @@ public final class ProjectileSim {
             if (inPenetration) {
                 // Tunneling: keep integrating "underground" (no further terrain/tank
                 // checks) until cumulative penetration depth passes the cap.
-                if (Math.abs(y - penetrationEntryY) >= TUNNELING_MAX_PENETRATION) {
+                undergroundPath.add(new double[] {x, y});
+                if (Math.abs(y - penetrationEntryY) >= maxPenetration) {
                     terminated = true;
                     break;
                 }
@@ -205,6 +288,7 @@ public final class ProjectileSim {
                     inPenetration = true;
                     penetrationEntryX = x;
                     penetrationEntryY = y;
+                    undergroundPath.add(new double[] {x, y});
                     continue;
                 }
                 if (bouncing && bounceCount < BOUNCING_MAX_BOUNCES) {
@@ -225,7 +309,7 @@ public final class ProjectileSim {
         double[] last = path.get(path.size() - 1);
         List<double[]> resampled = resample(path, RESAMPLE_POINTS);
         return new Result(path, resampled, last[0], last[1], hitPlayerId, apexHit, vx, vy, bounceCount,
-                penetrationEntryX, penetrationEntryY, bouncePoints);
+                penetrationEntryX, penetrationEntryY, bouncePoints, undergroundPath);
     }
 
     private static List<double[]> resample(List<double[]> path, int targetCount) {

@@ -105,18 +105,20 @@ export function drawTank(
 	ctx.fillRect(barX, barY, barW * Math.max(0, player.tank.health) / 100, barH);
 }
 
+/**
+ * @param aimAngleByPlayerId Every tank whose current aim angle is known
+ *   draws its barrel tracking it — the local player's own live drag, and
+ *   every other connected player's last PlayerAiming broadcast (see
+ *   matchStore's remoteAim). Players not present in this map fall back to
+ *   drawTank's neutral default (e.g. no aim received yet this session).
+ */
 export function drawTanks(
 	ctx: CanvasRenderingContext2D,
 	players: Player[],
 	viewport: Viewport,
-	localPlayerId?: string | null,
-	localAimAngleDeg?: number
+	aimAngleByPlayerId: Record<string, number> = {}
 ): void {
 	for (const player of players) {
-		const aim =
-			localPlayerId != null && player.playerId === localPlayerId && localAimAngleDeg != null
-				? localAimAngleDeg
-				: undefined;
-		drawTank(ctx, player, viewport, aim);
+		drawTank(ctx, player, viewport, aimAngleByPlayerId[player.playerId]);
 	}
 }
