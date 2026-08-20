@@ -68,13 +68,21 @@ class ProjectileSimTest {
     }
 
     @Test
-    void terminatesWhenFiredOutOfBounds() {
-        Terrain terrain = flatTerrain(500);
-        // Very flat, very fast shot fired left from near the edge -> exits world bounds quickly.
+    void wrapsAroundWhenFiredPastTheLeftEdge() {
+        Terrain terrain = flatTerrain(500); // width 1600, see flatTerrain()
+        // Very flat, very fast shot fired left from near the edge -> exits world
+        // bounds and should reappear on the right side rather than despawning.
         ProjectileSim.Result result = ProjectileSim.simulate(
                 5, 400, 180, 90, 0, terrain, Collections.emptyList());
 
-        assertTrue(result.impactX < 5, "expected the shot to exit the left edge");
+        assertTrue(result.impactX >= 0 && result.impactX < terrain.width(),
+                "wrapped impact should stay within world bounds, got " + result.impactX);
+        // Not pinned to which half it lands in (that depends on
+        // ProjectileSim.POWER_SCALE, which this test shouldn't be coupled
+        // to) — just prove it actually traveled past the edge and wrapped,
+        // rather than despawning right at/near it.
+        assertTrue(Math.abs(result.impactX - 5) > 50 && Math.abs(result.impactX - terrain.width()) > 50,
+                "expected the shot to travel well past the edge and wrap around, got " + result.impactX);
     }
 
     @Test

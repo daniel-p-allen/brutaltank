@@ -66,9 +66,6 @@
 					{/if}
 				</span>
 			{/each}
-			{#if $matchStore.wind}
-				<span class="wind">wind {$matchStore.wind.strength * $matchStore.wind.directionSign}</span>
-			{/if}
 		</div>
 
 		{#if $matchStore.roundEndedInfo}
@@ -150,11 +147,6 @@
 		margin-left: 0.25rem;
 		font-size: 0.7rem;
 		color: #e0a020;
-	}
-
-	.wind {
-		color: #888;
-		margin-left: auto;
 	}
 
 	.round-end-overlay {

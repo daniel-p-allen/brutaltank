@@ -60,13 +60,18 @@ public record WeaponDef(
 
     public static final WeaponDef HEAVY_CANNONBALL =
             new WeaponDef("heavy_cannonball", Behavior.STANDARD, 45.0, 40.0, 150, 3,
-                    0.85, 1.1, 1.0, 0.0);
+                    0.85, 1.1, 1.3, 0.0);
 
     public static final WeaponDef MIRV =
             new WeaponDef("mirv", Behavior.MIRV, 25.0, 15.0, 300, 2);
 
+    // Terrain signature (per Scorched Earth's manual: napalm "splashes...and
+    // bursts into hot flame", it doesn't excavate) is a wide, shallow burn
+    // dish rather than a normal pit: low craterDepthMultiplier against its
+    // already-wide blastRadius.
     public static final WeaponDef NAPALM =
-            new WeaponDef("napalm", Behavior.STANDARD, 50.0, 20.0, 250, 2);
+            new WeaponDef("napalm", Behavior.STANDARD, 50.0, 20.0, 250, 2,
+                    1.0, 1.0, 0.2, 0.0);
 
     public static final WeaponDef TUNNELING_SHOT =
             new WeaponDef("tunneling_shot", Behavior.TUNNELING, 25.0, 30.0, 200, 2);
@@ -78,12 +83,20 @@ public record WeaponDef(
             new WeaponDef("cluster_bomb", Behavior.CLUSTER, 20.0, 20.0, 280, 2,
                     1.0, 1.0, 1.0, 12.0);
 
+    // Narrow blastRadius + a large depth multiplier is enough on its own
+    // (via applyCrater's quadratic falloff) to read as a narrow deep shaft
+    // rather than a wide bowl — the signature Scorched Earth's Digger/
+    // Sandhog family tunnels straight down.
     public static final WeaponDef DIGGER =
             new WeaponDef("digger", Behavior.DIGGER, 20.0, 10.0, 120, 3,
-                    1.0, 1.0, 1.8, 0.0);
+                    1.0, 1.0, 3.0, 0.0);
 
+    // Biggest weapon gets the most dramatic terrain: with Terrain.FLOOR's
+    // extended headroom, a center hit now plunges close to the true bottom
+    // of the screen.
     public static final WeaponDef NUKE =
-            new WeaponDef("nuke", Behavior.STANDARD, 90.0, 70.0, 600, 1);
+            new WeaponDef("nuke", Behavior.STANDARD, 90.0, 70.0, 600, 1,
+                    1.0, 1.0, 2.3, 0.0);
 
     private static final Map<String, WeaponDef> WEAPONS_BY_ID = buildWeaponIndex();
 

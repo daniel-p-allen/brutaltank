@@ -8,15 +8,16 @@
 	// is"), but the client should still reflect that in the UI rather than
 	// let the local player click Fire and get silently rejected — so Fire is
 	// disabled whenever it isn't the local player's turn, in addition to the
-	// existing optimistic-disable while a shot is in flight.
+	// existing optimistic-disable while a shot is in flight. The angle/power
+	// sliders themselves stay enabled regardless of turn (per user feedback:
+	// you should be able to play with your aim even when it's not your
+	// shot) — only the Fire button and weapon select are turn-gated.
 
 	import { sendFire } from '../../game/input/fireInput';
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
+	import { aimStore } from '../../stores/aimStore';
 	import WeaponSelect from './WeaponSelect.svelte';
-
-	let angleDeg = 45;
-	let power = 50;
 
 	$: isMyTurn =
 		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
@@ -24,7 +25,7 @@
 
 	function fire(): void {
 		if (disabled) return;
-		sendFire(angleDeg, power);
+		sendFire($aimStore.angleDeg, $aimStore.power);
 	}
 </script>
 
@@ -32,13 +33,20 @@
 
 <div class="fire-controls">
 	<label class="control">
-		<span>Angle: {angleDeg}&deg;</span>
-		<input type="range" min="0" max="90" step="1" bind:value={angleDeg} disabled={disabled} />
+		<span>Angle: {$aimStore.angleDeg}&deg;</span>
+		<input
+			class="angle-slider"
+			type="range"
+			min="0"
+			max="180"
+			step="1"
+			bind:value={$aimStore.angleDeg}
+		/>
 	</label>
 
 	<label class="control">
-		<span>Power: {power}</span>
-		<input type="range" min="0" max="100" step="1" bind:value={power} disabled={disabled} />
+		<span>Power: {$aimStore.power}</span>
+		<input type="range" min="0" max="100" step="1" bind:value={$aimStore.power} />
 	</label>
 
 	<button class="fire-button" on:click={fire} disabled={disabled}>
@@ -62,6 +70,15 @@
 		flex-direction: column;
 		gap: 0.25rem;
 		font-size: 0.85rem;
+	}
+
+	/* Angle 0deg points screen-right, 90deg points up (tankRenderer.ts convention),
+	   so a plain left-to-right slider drags the thumb *away* from the direction the
+	   barrel tip visibly sweeps. rtl flips the track so dragging the thumb right
+	   sweeps the barrel right too, per user feedback that drag direction and barrel
+	   sweep direction must match. */
+	.angle-slider {
+		direction: rtl;
 	}
 
 	.fire-button {

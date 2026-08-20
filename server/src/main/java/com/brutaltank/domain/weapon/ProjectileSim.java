@@ -31,7 +31,12 @@ public final class ProjectileSim {
     public static final double GRAVITY = 220.0; // units/s^2
     public static final double WIND_ACCEL_PER_STRENGTH = 4.0;
     public static final double DT = 1.0 / 60.0;
-    public static final double POWER_SCALE = 4.0;
+    // 12.0 doubles the old 6.0 (per user feedback: today's max power should
+    // become the new 50% mark) — max-power/45deg vacuum range is now ~6544
+    // units, well past the ~1300-unit worst-case spawn separation and the
+    // 1600-unit map width, so shots can wrap the screen more than once at
+    // full power. Was 4.0 (~727 range) in M1/M2, then 6.0 (~1636 range).
+    public static final double POWER_SCALE = 12.0;
     public static final double TANK_HITBOX_RADIUS = 14.0;
     public static final int RESAMPLE_POINTS = 36;
 
@@ -63,10 +68,25 @@ public final class ProjectileSim {
         public final double finalVy;
         /** Number of terrain bounces this shot performed (BOUNCING behavior; 0 otherwise). */
         public final int bounceCount;
+        /**
+         * Where this shot first penetrated the ground (TUNNELING only; NaN
+         * otherwise) — lets {@code Match} carve a visible bore track from
+         * here down to the final {@code impactX}/{@code impactY}, instead of
+         * just a single detached crater at the bottom of the tunnel.
+         */
+        public final double tunnelEntryX;
+        public final double tunnelEntryY;
+        /**
+         * The {@code (x, groundY)} of each terrain bounce this shot made
+         * (BOUNCING only; empty otherwise) — lets {@code Match} leave a small
+         * "skip mark" at each one, distinct from the final detonation.
+         */
+        public final List<double[]> bouncePoints;
 
         Result(List<double[]> rawPath, List<double[]> resampledTrajectory,
                double impactX, double impactY, String hitPlayerId,
-               boolean stoppedAtApex, double finalVx, double finalVy, int bounceCount) {
+               boolean stoppedAtApex, double finalVx, double finalVy, int bounceCount,
+               double tunnelEntryX, double tunnelEntryY, List<double[]> bouncePoints) {
             this.rawPath = rawPath;
             this.resampledTrajectory = resampledTrajectory;
             this.impactX = impactX;
@@ -76,6 +96,9 @@ public final class ProjectileSim {
             this.finalVx = finalVx;
             this.finalVy = finalVy;
             this.bounceCount = bounceCount;
+            this.tunnelEntryX = tunnelEntryX;
+            this.tunnelEntryY = tunnelEntryY;
+            this.bouncePoints = bouncePoints;
         }
     }
 
@@ -117,8 +140,10 @@ public final class ProjectileSim {
         boolean tunneling = behavior == WeaponDef.Behavior.TUNNELING;
         boolean bouncing = behavior == WeaponDef.Behavior.BOUNCING;
         boolean inPenetration = false;
+        double penetrationEntryX = Double.NaN;
         double penetrationEntryY = 0;
         int bounceCount = 0;
+        List<double[]> bouncePoints = new ArrayList<>();
 
         for (int step = 0; step < MAX_STEPS; step++) {
             double vyBefore = vy;
@@ -135,8 +160,16 @@ public final class ProjectileSim {
             y += vy * DT;
             path.add(new double[] {x, y});
 
-            // Out of bounds (either side or far below floor).
-            if (x < 0 || x >= terrain.width() || y > Terrain.FLOOR + 50) {
+            // Screen wrap: a shot flying off one edge continues from the
+            // other side instead of despawning (world is horizontally
+            // cyclic), so it can still cross the map and hit a tank there.
+            double width = terrain.width();
+            if (x < 0 || x >= width) {
+                x = ((x % width) + width) % width;
+            }
+
+            // Out of bounds vertically (far below floor) still ends the shot.
+            if (y > Terrain.FLOOR + 50) {
                 terminated = true;
                 break;
             }
@@ -170,6 +203,7 @@ public final class ProjectileSim {
             if (y >= groundY) {
                 if (tunneling) {
                     inPenetration = true;
+                    penetrationEntryX = x;
                     penetrationEntryY = y;
                     continue;
                 }
@@ -177,6 +211,7 @@ public final class ProjectileSim {
                     double incidenceDeg = Math.toDegrees(Math.atan2(Math.abs(vy), Math.abs(vx) + 1e-9));
                     if (incidenceDeg < BOUNCING_SHALLOW_ANGLE_DEG) {
                         bounceCount++;
+                        bouncePoints.add(new double[] {x, groundY});
                         vy = -vy * BOUNCING_ENERGY_RETENTION;
                         y = groundY - 1; // nudge back above ground to avoid immediate re-trigger
                         continue;
@@ -189,7 +224,8 @@ public final class ProjectileSim {
 
         double[] last = path.get(path.size() - 1);
         List<double[]> resampled = resample(path, RESAMPLE_POINTS);
-        return new Result(path, resampled, last[0], last[1], hitPlayerId, apexHit, vx, vy, bounceCount);
+        return new Result(path, resampled, last[0], last[1], hitPlayerId, apexHit, vx, vy, bounceCount,
+                penetrationEntryX, penetrationEntryY, bouncePoints);
     }
 
     private static List<double[]> resample(List<double[]> path, int targetCount) {

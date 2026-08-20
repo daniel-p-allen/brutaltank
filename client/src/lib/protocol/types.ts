@@ -102,6 +102,12 @@ export interface CashEarned {
 	amount: number;
 }
 
+/** A tank whose ground gave way this shot and dropped to the new terrain level (position-only; any fall damage is in damageEvents). */
+export interface TankFall {
+	playerId: string;
+	newY: number;
+}
+
 export interface ShotResolvedPayload {
 	shooterId: string;
 	weaponId: string;
@@ -110,6 +116,7 @@ export interface ShotResolvedPayload {
 	terrainDelta: TerrainDelta;
 	damageEvents: DamageEvent[];
 	cashEarned: CashEarned[];
+	tankFalls: TankFall[];
 }
 
 export type MatchStateSyncEnvelope = Envelope<MatchStateSyncPayload>;

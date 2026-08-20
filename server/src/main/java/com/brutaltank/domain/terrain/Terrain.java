@@ -14,7 +14,13 @@ package com.brutaltank.domain.terrain;
 public final class Terrain {
 
     public static final int CEILING = 80;
-    public static final int FLOOR = 550;
+    // Near the client's WORLD_HEIGHT=700 canvas mapping (coords.ts), not the
+    // generator's default baseline (see TerrainGenerator.BASELINE_HEIGHT,
+    // deliberately decoupled from FLOOR): this is purely how deep a crater
+    // is allowed to dig, so a powerful-enough weapon can visibly plunge to
+    // the true bottom of the screen instead of clamping flat well short of
+    // it. Was 550.
+    public static final int FLOOR = 690;
 
     private final int[] heights;
 
@@ -97,6 +103,46 @@ public final class Terrain {
         int[] delta = new int[endX - startX + 1];
         System.arraycopy(heights, startX, delta, 0, delta.length);
         return new CraterResult(startX, endX, delta);
+    }
+
+    private static final int SETTLE_MAX_SLOPE = 10;
+    private static final int SETTLE_PADDING = 60;
+    private static final int SETTLE_MAX_ITERATIONS = 40;
+
+    /**
+     * Heightmap-appropriate stand-in for Scorched Earth's real per-pixel
+     * "unsupported dirt falls until it lands" rule: a 1D heightmap can't
+     * represent a floating overhang, but it can represent (and correct) an
+     * implausibly steep cliff a crater just cut into flat ground. Erodes
+     * (deepens) whichever side of each too-steep adjacent-column pair is
+     * higher, repeating until every step in the padded range is within
+     * {@link #SETTLE_MAX_SLOPE} world-units of its neighbor or the
+     * iteration cap is hit. Net loss of material (no fill-back-in) is a
+     * deliberate simplification, consistent with this codebase's other
+     * approximated weapon behaviors.
+     *
+     * @return the actual [startX, endX] column range touched, for the
+     *         caller to fold into its terrainDelta.
+     */
+    public int[] settleSlopes(int startX, int endX) {
+        int lo = Math.max(0, startX - SETTLE_PADDING);
+        int hi = Math.min(heights.length - 1, endX + SETTLE_PADDING);
+
+        boolean changed = true;
+        for (int iter = 0; iter < SETTLE_MAX_ITERATIONS && changed; iter++) {
+            changed = false;
+            for (int x = lo; x < hi; x++) {
+                int diff = heights[x + 1] - heights[x];
+                if (diff > SETTLE_MAX_SLOPE) {
+                    heights[x] = clamp(heights[x] + (diff - SETTLE_MAX_SLOPE));
+                    changed = true;
+                } else if (-diff > SETTLE_MAX_SLOPE) {
+                    heights[x + 1] = clamp(heights[x + 1] + (-diff - SETTLE_MAX_SLOPE));
+                    changed = true;
+                }
+            }
+        }
+        return new int[] {lo, hi};
     }
 
     static int clamp(int height) {

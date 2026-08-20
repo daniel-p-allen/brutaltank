@@ -127,12 +127,18 @@ export function applyShotResolved(state: MatchState, payload: ShotResolvedPayloa
 	}
 
 	const healthByPlayer = new Map(payload.damageEvents.map((e) => [e.playerId, e]));
+	const fallByPlayer = new Map((payload.tankFalls ?? []).map((f) => [f.playerId, f]));
 	const players = state.players.map((p) => {
 		const dmg = healthByPlayer.get(p.playerId);
-		if (!dmg) return p;
+		const fall = fallByPlayer.get(p.playerId);
+		if (!dmg && !fall) return p;
 		return {
 			...p,
-			tank: { ...p.tank, health: dmg.newHealth, alive: !dmg.eliminated }
+			tank: {
+				...p.tank,
+				...(dmg ? { health: dmg.newHealth, alive: !dmg.eliminated } : {}),
+				...(fall ? { y: fall.newY } : {})
+			}
 		};
 	});
 
@@ -201,12 +207,23 @@ function createMatchStore() {
 
 			case 'ShotResolved': {
 				const payload = envelope.payload as ShotResolvedPayload;
-				update((state) => applyShotResolved(state, payload));
+				let preShotHeights: number[] = [];
+				const preShotHealth: Record<string, { health: number; alive: boolean }> = {};
+				update((state) => {
+					preShotHeights = state.terrain.heights;
+					for (const e of payload.damageEvents) {
+						const p = state.players.find((pl) => pl.playerId === e.playerId);
+						if (p) preShotHealth[e.playerId] = { health: p.tank.health, alive: p.tank.alive };
+					}
+					return applyShotResolved(state, payload);
+				});
 				queueShotAnimation({
 					shooterId: payload.shooterId,
 					weaponId: payload.weaponId,
 					trajectory: payload.trajectory,
-					impact: payload.impact
+					impact: payload.impact,
+					preShotHeights,
+					preShotHealth
 				});
 				return;
 			}

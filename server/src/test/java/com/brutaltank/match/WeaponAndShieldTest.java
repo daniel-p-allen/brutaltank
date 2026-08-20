@@ -5,6 +5,7 @@ import com.brutaltank.domain.weapon.DamageCalculator;
 import com.brutaltank.domain.weapon.ProjectileSim;
 import com.brutaltank.domain.weapon.ShieldDef;
 import com.brutaltank.domain.weapon.WeaponDef;
+import com.brutaltank.protocol.Payloads;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +77,21 @@ class WeaponAndShieldTest {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
+    /**
+     * Mirrors Match.resolveShot's barrel-tip launch point (turret pivot +
+     * BARREL_LENGTH along the fire angle) so these tests' own predictive
+     * ProjectileSim.simulate() calls start from the same point the real
+     * shot does.
+     */
+    private static double[] barrelTip(double tankX, double tankY, double angleDeg) {
+        double turretY = tankY - Match.TANK_WORLD_HEIGHT;
+        double rad = Math.toRadians(angleDeg);
+        return new double[] {
+                tankX + Math.cos(rad) * Match.BARREL_LENGTH,
+                turretY - Math.sin(rad) * Match.BARREL_LENGTH
+        };
+    }
+
     // -----------------------------------------------------------------
     // MIRV: splits into several children at apex, multiple damage events.
     // -----------------------------------------------------------------
@@ -105,7 +121,8 @@ class WeaponAndShieldTest {
         // Replicate MIRV's own apex-then-4-children simulation to predict
         // exactly where each child will land (no wind, flat terrain -> fully
         // deterministic), then place a target tank at each landing spot.
-        ProjectileSim.Result apex = ProjectileSim.simulate(400, 500, angle, power, 0,
+        double[] tip = barrelTip(400, 500, angle);
+        ProjectileSim.Result apex = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
                 match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, true);
         assertTrue(apex.stoppedAtApex, "test setup expects the shot to reach an apex");
 
@@ -123,6 +140,88 @@ class WeaponAndShieldTest {
         int damageEventCount = outcome.shotResolved().damageEvents.size();
         assertTrue(damageEventCount >= 2,
                 "expected MIRV to produce multiple damage events, got " + damageEventCount);
+    }
+
+    // -----------------------------------------------------------------
+    // MIRV trajectory: the single flight-animation dot walks
+    // ShotResolved.trajectory front-to-back, so it must read as ONE
+    // continuous flight, not double back on itself.
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void mirvSplitReportsOnlyTheApexImpactPoint() {
+        Match match = newMatch("m-mirv-impact");
+        Joined shooter = join(match, "Shooter");
+        Joined t1 = join(match, "T1");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(t1.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 400, 500);
+        match.debugSetTankPosition(t1.playerId(), 1590, 500); // out of blast range
+
+        double angle = 45;
+        double power = 55;
+        double[] tip = barrelTip(400, 500, angle);
+        ProjectileSim.Result apex = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
+                match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, true);
+        assertTrue(apex.stoppedAtApex, "test setup expects the shot to reach an apex");
+
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "mirv", angle, power);
+        assertTrue(outcome.accepted());
+
+        Payloads.Impact impact = outcome.shotResolved().impact;
+        assertEquals(apex.impactX, impact.x, 2.0, "reported impact should be the split point, not a child's landing spot");
+        assertEquals(apex.impactY, impact.y, 2.0, "reported impact should be the split point, not a child's landing spot");
+    }
+
+    @Test
+    @Timeout(10)
+    void mirvTrajectoryDoesNotRewindAfterSplit() {
+        Match match = newMatch("m-mirv-traj");
+        Joined shooter = join(match, "Shooter");
+        Joined t1 = join(match, "T1");
+        match.setReady(shooter.playerId(), true);
+        match.setReady(t1.playerId(), true);
+
+        match.debugSetTerrain(flatTerrain(1600, 500));
+        match.debugSetWind(0);
+        match.debugSetTankPosition(shooter.playerId(), 400, 500);
+        match.debugSetTankPosition(t1.playerId(), 1590, 500); // out of blast range
+
+        double angle = 45;
+        double power = 55;
+
+        Match.FireOutcome outcome = match.fire(shooter.playerId(), "r1", "mirv", angle, power);
+        assertTrue(outcome.accepted());
+
+        List<Payloads.TrajectoryPoint> trajectory = outcome.shotResolved().trajectory;
+        assertTrue(trajectory.size() >= 2, "expected a non-trivial trajectory");
+
+        // A single flight-animation dot (GameCanvas/projectileRenderer) walks
+        // this list front-to-back over a fixed duration. With no wind and a
+        // rightward 45deg launch, x should climb monotonically to the apex;
+        // if a split child's full post-apex descent path got appended after
+        // the apex path (concatenating multiple separate flights end-to-end
+        // instead of reporting just the shared ascent), x would visibly jump
+        // backward partway through as playback rewinds to the split point
+        // for the next child.
+        double maxXSoFar = trajectory.get(0).x;
+        for (Payloads.TrajectoryPoint p : trajectory) {
+            assertTrue(p.x >= maxXSoFar - 1.0,
+                    "trajectory x should never rewind (the animation dot would jump backward): " + describe(trajectory));
+            maxXSoFar = Math.max(maxXSoFar, p.x);
+        }
+    }
+
+    private static String describe(List<Payloads.TrajectoryPoint> trajectory) {
+        StringBuilder sb = new StringBuilder();
+        for (Payloads.TrajectoryPoint p : trajectory) {
+            sb.append('(').append(Math.round(p.x)).append(',').append(Math.round(p.y)).append(") ");
+        }
+        return sb.toString();
     }
 
     // -----------------------------------------------------------------
@@ -144,7 +243,8 @@ class WeaponAndShieldTest {
 
         double angle = 45;
         double power = 55;
-        ProjectileSim.Result predicted = ProjectileSim.simulate(400, 500, angle, power, 0,
+        double[] tip = barrelTip(400, 500, angle);
+        ProjectileSim.Result predicted = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
                 match.debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
         // Place the victim exactly at the primary impact point for a guaranteed damage event.
         match.debugSetTankPosition(victim.playerId(), predicted.impactX, predicted.impactY);
@@ -227,6 +327,29 @@ class WeaponAndShieldTest {
         return new ShieldScenario(match, owner.playerId(), shooter.playerId());
     }
 
+    /**
+     * Binary-searches a basic_shell power (at 45deg from the shooter's barrel
+     * tip) whose flat-terrain impactX lands at {@code targetImpactX}, so the
+     * shield tests stay valid regardless of ProjectileSim.POWER_SCALE tuning
+     * instead of relying on a power constant hand-picked for one scale.
+     */
+    private static double findPowerForImpactX(ShieldScenario s, double angle, double targetImpactX) {
+        double lo = 1;
+        double hi = 100;
+        for (int i = 0; i < 40; i++) {
+            double mid = (lo + hi) / 2;
+            double[] tip = barrelTip(200, 500, angle);
+            ProjectileSim.Result r = ProjectileSim.simulate(tip[0], tip[1], angle, mid, 0,
+                    s.match().debugTerrain(), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+            if (r.impactX < targetImpactX) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return (lo + hi) / 2;
+    }
+
     /** Predicts the exact impact point + resulting raw (pre-shield) damage for a basic_shell shot at the owner. */
     private double[] predictBasicShellHit(ShieldScenario s, double angle, double power) {
         return predictHit(s, WeaponDef.BASIC_SHELL, angle, power);
@@ -236,7 +359,8 @@ class WeaponAndShieldTest {
     private double[] predictHit(ShieldScenario s, WeaponDef weapon, double angle, double power) {
         List<ProjectileSim.TankTarget> targets = List.of(
                 new ProjectileSim.TankTarget(s.ownerId(), 500, 500));
-        ProjectileSim.Result sim = ProjectileSim.simulate(200, 500, angle, power, 0,
+        double[] tip = barrelTip(200, 500, angle);
+        ProjectileSim.Result sim = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
                 s.match().debugTerrain(), targets, WeaponDef.Behavior.STANDARD,
                 weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
         List<DamageCalculator.TankState> tanks = List.of(new DamageCalculator.TankState(s.ownerId(), 500, 500, 100));
@@ -257,7 +381,7 @@ class WeaponAndShieldTest {
         assertEquals("absorb_shield", match.activeShieldIdOf(s.ownerId()));
 
         double angle = 45;
-        double power = 64; // lands close to the owner at x=500
+        double power = findPowerForImpactX(s, angle, 500); // lands close to the owner at x=500
         double[] predicted = predictBasicShellHit(s, angle, power);
         double rawDamage = predicted[0];
         double expectedMitigated = rawDamage * 0.5;
@@ -284,6 +408,18 @@ class WeaponAndShieldTest {
             // cause unrelated self-damage.
             match.debugSetWind(0);
             assertTrue(match.fire(s.ownerId(), "rFiller" + i, "basic_shell", 45, 90).accepted());
+
+            // Reset terrain + positions to the pristine scenario before each
+            // repeated hit: with FLOOR's new headroom, craters no longer
+            // saturate after a couple of hits the way they used to, so
+            // repeatedly hitting the same spot with a fixed angle/power (and
+            // letting the tank-fall pass move the owner as its crater deepens)
+            // would otherwise drift the impact off-target well before 14
+            // iterations. This test is about the shield's cumulative-absorption
+            // bookkeeping, not terrain evolution, so keep every hit identical.
+            match.debugSetTerrain(flatTerrain(1600, 500));
+            match.debugSetTankPosition(s.ownerId(), 500, 500);
+            match.debugSetTankPosition(s.shooterId(), 200, 500);
             match.debugSetWind(0);
             assertTrue(match.fire(s.shooterId(), "rHit" + i, "basic_shell", angle, power).accepted());
             if (match.activeShieldIdOf(s.ownerId()) == null) {
@@ -304,7 +440,7 @@ class WeaponAndShieldTest {
         assertEquals("deflect_shield", match.activeShieldIdOf(s.ownerId()));
 
         double angle = 45;
-        double power = 64; // lands close to the owner at x=500
+        double power = findPowerForImpactX(s, angle, 500); // lands close to the owner at x=500
         double[] predicted = predictBasicShellHit(s, angle, power);
         boolean isDirectHit = predicted[1] == 1.0;
 
@@ -333,9 +469,10 @@ class WeaponAndShieldTest {
         // within blast radius but far enough from the exact tank position to fall
         // outside DamageCalculator.DIRECT_HIT_RADIUS).
         double angle = 45;
-        double power = 62; // lands ~20 units short of the owner: within blast radius, outside direct-hit radius
+        double power = findPowerForImpactX(s, angle, 480); // lands ~20 units short of the owner: within blast radius, outside direct-hit radius
         List<ProjectileSim.TankTarget> noTargets = Collections.emptyList();
-        ProjectileSim.Result sim = ProjectileSim.simulate(200, 500, angle, power, 0,
+        double[] tip = barrelTip(200, 500, angle);
+        ProjectileSim.Result sim = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
                 match.debugTerrain(), noTargets, WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
         double dist = distance(500, 500, sim.impactX, sim.impactY);
         // Only proceed with the near-miss assertion if this setup actually lands
@@ -361,7 +498,7 @@ class WeaponAndShieldTest {
 
         int cashBefore = match.cashOf(s.ownerId());
         double angle = 45;
-        double power = 64; // lands close to the owner at x=500
+        double power = findPowerForImpactX(s, angle, 500); // lands close to the owner at x=500
         double[] predicted = predictBasicShellHit(s, angle, power);
         double rawDamage = predicted[0];
         double expectedMitigated = rawDamage * 0.7;

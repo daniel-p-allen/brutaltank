@@ -89,7 +89,8 @@ describe('matchStore', () => {
 			impact: { x: 8, y: 108 },
 			terrainDelta: { startX: 6, endX: 9, heights: [200, 201, 202, 203] },
 			damageEvents: [{ playerId: 'p-2', damage: 22, newHealth: 78, eliminated: false }],
-			cashEarned: [{ playerId: 'p-1', amount: 110 }]
+			cashEarned: [{ playerId: 'p-1', amount: 110 }],
+			tankFalls: []
 		};
 
 		MockWebSocket.latest().emitMessage(
@@ -117,7 +118,8 @@ describe('matchStore', () => {
 			impact: { x: 8, y: 108 },
 			terrainDelta: { startX: 0, endX: 0, heights: [99] },
 			damageEvents: [{ playerId: 'p-2', damage: 100, newHealth: 0, eliminated: true }],
-			cashEarned: []
+			cashEarned: [],
+			tankFalls: []
 		});
 
 		const p2 = state.players.find((p) => p.playerId === 'p-2')!;
@@ -133,9 +135,27 @@ describe('matchStore', () => {
 			impact: { x: 0, y: 0 },
 			terrainDelta: { startX: 500, endX: 510, heights: new Array(11).fill(1) },
 			damageEvents: [],
-			cashEarned: []
+			cashEarned: [],
+			tankFalls: []
 		});
 		expect(state.terrain.heights).toEqual(samplePayload.terrain.heights);
+	});
+
+	it('patches a tank\'s y from tankFalls without requiring a damageEvent', () => {
+		const state = applyShotResolved(applyMatchStateSync(samplePayload), {
+			shooterId: 'p-1',
+			weaponId: 'basic_shell',
+			trajectory: [],
+			impact: { x: 8, y: 108 },
+			terrainDelta: { startX: 0, endX: 0, heights: [99] },
+			damageEvents: [],
+			cashEarned: [],
+			tankFalls: [{ playerId: 'p-2', newY: 250 }]
+		});
+
+		const p2 = state.players.find((p) => p.playerId === 'p-2')!;
+		expect(p2.tank.y).toBe(250);
+		expect(p2.tank.health).toBe(100); // unaffected: no damageEvent for p-2
 	});
 
 	it('sets activePlayerId from turnOrder/currentTurnIndex on MatchStateSync', () => {

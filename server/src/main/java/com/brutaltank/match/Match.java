@@ -393,9 +393,21 @@ public final class Match {
     // Turn state machine (PLAN.md 2.3)
     // =================================================================
 
+    // Max wind magnitude, i.e. wind rolls in [-WIND_MAX, WIND_MAX]. Halved
+    // per user feedback (was 20) after doubling ProjectileSim.POWER_SCALE
+    // made wind drift feel overly strong relative to shot power.
+    private static final int WIND_MAX = 10;
+
+    // Wind persists across 2 consecutive turns before rerolling (per user
+    // feedback), rather than rerolling fresh every single turn. turnsThisRound
+    // is 0 at the first turn of a round (always rerolls, so every round
+    // starts with a fresh wind) and increments once per resolved turn, so
+    // rerolling only on even values pairs turns (0,1), (2,3), (4,5), ...
     private void beginTurn() {
-        windStrength = ThreadLocalRandom.current().nextInt(-20, 21);
-        windDirectionSign = windStrength >= 0 ? 1 : -1;
+        if (turnsThisRound % 2 == 0) {
+            windStrength = ThreadLocalRandom.current().nextInt(-WIND_MAX, WIND_MAX + 1);
+            windDirectionSign = windStrength >= 0 ? 1 : -1;
+        }
 
         turnToken++;
         int myToken = turnToken;
@@ -577,6 +589,30 @@ public final class Match {
 
     private static final double[] MIRV_SPREAD_OFFSETS_DEG = {-15.0, -5.0, 5.0, 15.0};
     private static final double[] CLUSTER_BOMBLET_OFFSETS_X = {-50.0, -25.0, 25.0, 50.0};
+    // Cosmetic, zero-damage detonations that give Tunneling/Bouncing a
+    // visible terrain track (a bore shaft, a line of skip marks) instead of
+    // just the one final crater every other STANDARD-shaped weapon leaves.
+    private static final int TUNNEL_TRACK_MARKS = 3;
+    private static final double TUNNEL_TRACK_RADIUS = 10.0;
+    private static final double BOUNCE_SKIP_MARK_RADIUS = 8.0;
+
+    // Tank-fall tuning (PLAN.md-adjacent, per live-playtest feedback): a
+    // tank whose column's ground drops out from under it (crater, gully, or
+    // the post-crater slope-settle pass) snaps down to the new ground level
+    // for free below this drop distance; past it, a Scorched-Earth-style
+    // "fell too far" fall damage applies, scaled by how far past the
+    // threshold and capped.
+    private static final double FALL_SNAP_EPSILON = 0.5;
+    private static final double FALL_DAMAGE_THRESHOLD = 60.0;
+    private static final double FALL_DAMAGE_RATE = 0.5;
+    private static final double FALL_DAMAGE_CAP = 40.0;
+
+    // Mirrors tankRenderer.ts's TANK_WORLD_HEIGHT/BARREL_LENGTH so shots launch
+    // from the same barrel tip the client draws, not the tank's ground-level
+    // x/y. Keep these two files' geometry in sync by hand if the tank shape
+    // changes again.
+    static final double TANK_WORLD_HEIGHT = 17.0;
+    static final double BARREL_LENGTH = 30.0 * 1.15;
 
     private Payloads.ShotResolved resolveShot(MatchPlayer shooter, String weaponId, double angleDeg, double power) {
         if (ShieldDef.isShieldId(weaponId)) {
@@ -594,8 +630,14 @@ public final class Match {
             targets.add(new ProjectileSim.TankTarget(p.player.playerId, p.player.tank.x, p.player.tank.y));
         }
 
-        double startX = shooter.player.tank.x;
-        double startY = shooter.player.tank.y;
+        // Launch from the barrel tip (turret pivot + BARREL_LENGTH along the
+        // fire angle), matching what the player actually sees on screen,
+        // rather than the tank's ground-level x/y.
+        double turretX = shooter.player.tank.x;
+        double turretY = shooter.player.tank.y - TANK_WORLD_HEIGHT;
+        double angleRad = Math.toRadians(angleDeg);
+        double startX = turretX + Math.cos(angleRad) * BARREL_LENGTH;
+        double startY = turretY - Math.sin(angleRad) * BARREL_LENGTH;
 
         List<double[]> mergedTrajectory = new ArrayList<>();
         List<DetonationSpec> detonations = new ArrayList<>();
@@ -608,6 +650,18 @@ public final class Match {
                         windStrength, terrain, targets, WeaponDef.Behavior.TUNNELING,
                         weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
                 mergedTrajectory.addAll(sim.resampledTrajectory);
+                // Bore track: a few small, shallow, zero-damage marks linearly
+                // interpolated from where the shot first penetrated the ground
+                // down to its final detonation point, so the tunnel is visibly
+                // carved rather than leaving just a single detached crater.
+                if (!Double.isNaN(sim.tunnelEntryX)) {
+                    for (int i = 1; i <= TUNNEL_TRACK_MARKS; i++) {
+                        double t = (double) i / (TUNNEL_TRACK_MARKS + 1);
+                        double markX = sim.tunnelEntryX + (sim.impactX - sim.tunnelEntryX) * t;
+                        double markY = sim.tunnelEntryY + (sim.impactY - sim.tunnelEntryY) * t;
+                        detonations.add(new DetonationSpec(markX, markY, TUNNEL_TRACK_RADIUS, 0));
+                    }
+                }
                 detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
                 impactX = sim.impactX;
                 impactY = sim.impactY;
@@ -617,6 +671,11 @@ public final class Match {
                         windStrength, terrain, targets, WeaponDef.Behavior.BOUNCING,
                         weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
                 mergedTrajectory.addAll(sim.resampledTrajectory);
+                // Skip marks: a small, shallow, zero-damage ding at each bounce
+                // point before the final detonation, like a skipped stone.
+                for (double[] bp : sim.bouncePoints) {
+                    detonations.add(new DetonationSpec(bp[0], bp[1], BOUNCE_SKIP_MARK_RADIUS, 0));
+                }
                 detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage()));
                 impactX = sim.impactX;
                 impactY = sim.impactY;
@@ -637,11 +696,20 @@ public final class Match {
                     impactX = apexSim.impactX;
                     impactY = apexSim.impactY;
                 } else {
+                    // mergedTrajectory intentionally stays just the shared apex
+                    // ascent here: the client plays this list back as ONE
+                    // continuous flight with a single animated dot
+                    // (GameCanvas/projectileRenderer), so appending each
+                    // child's full post-split descent path after it would
+                    // make that dot repeatedly jump backward to the split
+                    // point to "fly" the next child — 4 visible rewinds.
+                    // Craters/damage from every child still land correctly
+                    // via detonations below; only the animated flight path
+                    // is limited to the one shared, non-rewinding leg.
                     for (double offset : MIRV_SPREAD_OFFSETS_DEG) {
                         ProjectileSim.Result child = ProjectileSim.simulate(
                                 apexSim.impactX, apexSim.impactY, angleDeg + offset, clampedPower,
                                 windStrength, terrain, targets, WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
-                        mergedTrajectory.addAll(child.resampledTrajectory);
                         detonations.add(new DetonationSpec(child.impactX, child.impactY, weapon.blastRadius(), weapon.centerDamage()));
                     }
                     // Reported impact is the split point itself, the one meaningful
@@ -716,6 +784,7 @@ public final class Match {
         resolved.terrainDelta = new Payloads.TerrainDelta(col, col, new int[] {terrain.heightAt(col)});
         resolved.damageEvents = new ArrayList<>();
         resolved.cashEarned = new ArrayList<>();
+        resolved.tankFalls = new ArrayList<>();
         return resolved;
     }
 
@@ -781,6 +850,57 @@ public final class Match {
             }
         }
 
+        // Slope settling: erode any implausibly steep cliff the craters above
+        // just cut into flat ground (heightmap-appropriate stand-in for
+        // Scorched Earth's real per-pixel "unsupported dirt falls" rule).
+        if (minStart <= maxEnd) {
+            int[] settled = terrain.settleSlopes(minStart, maxEnd);
+            minStart = Math.min(minStart, settled[0]);
+            maxEnd = Math.max(maxEnd, settled[1]);
+        }
+
+        // Tank falls: any surviving tank whose column's ground is now lower
+        // than it (undermined by a crater/gully, or by the settle pass
+        // above) drops to the new ground level, taking fall damage past a
+        // threshold. Merged into the same damageByPlayer/workingHealth/
+        // cashFromDamage bookkeeping as blast damage so a tank that's both
+        // blasted and falls gets one consistent final health change.
+        List<Payloads.TankFall> tankFalls = new ArrayList<>();
+        for (MatchPlayer p : players.values()) {
+            if (p.departed || !p.player.tank.alive) {
+                continue;
+            }
+            Double hp = workingHealth.get(p.player.playerId);
+            if (hp == null || hp <= 0.0) {
+                continue;
+            }
+            int col = Math.max(0, Math.min(terrain.width() - 1, (int) Math.round(p.player.tank.x)));
+            double groundY = terrain.heightAt(col);
+            if (groundY <= p.player.tank.y + FALL_SNAP_EPSILON) {
+                continue;
+            }
+            double dropDistance = groundY - p.player.tank.y;
+            p.player.tank.y = groundY;
+            tankFalls.add(new Payloads.TankFall(p.player.playerId, groundY));
+
+            if (dropDistance > FALL_DAMAGE_THRESHOLD) {
+                double fallDamage = Math.min(FALL_DAMAGE_CAP,
+                        Math.round((dropDistance - FALL_DAMAGE_THRESHOLD) * FALL_DAMAGE_RATE));
+                double newHealth = Math.max(0.0, Math.round(hp - fallDamage));
+                boolean eliminated = newHealth <= 0.0;
+                workingHealth.put(p.player.playerId, newHealth);
+
+                Payloads.DamageEvent existing = damageByPlayer.get(p.player.playerId);
+                double cumulativeDamage = (existing != null ? existing.damage : 0.0) + fallDamage;
+                damageByPlayer.put(p.player.playerId,
+                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated));
+
+                if (!p.player.playerId.equals(shooter.player.playerId)) {
+                    cashFromDamage += (int) Math.round(fallDamage * DamageCalculator.CASH_PER_DAMAGE);
+                }
+            }
+        }
+
         if (cashFromDamage > 0) {
             shooter.player.cash += cashFromDamage;
             cashEarned.add(new Payloads.CashEarned(shooter.player.playerId, cashFromDamage));
@@ -821,6 +941,7 @@ public final class Match {
         }
         resolved.damageEvents = damageEvents;
         resolved.cashEarned = cashEarned;
+        resolved.tankFalls = tankFalls;
         return resolved;
     }
 

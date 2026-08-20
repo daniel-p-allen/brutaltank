@@ -23,6 +23,13 @@ public final class TerrainGenerator {
     private static final double DAMPING_EXPONENT = 0.6;
     private static final int MIDPOINT_LEVELS = 10; // 2^10 = 1024 >= enough resolution below WORLD_WIDTH
 
+    // Deliberately an absolute constant, not a fraction of (CEILING, FLOOR):
+    // FLOOR was extended well past this so deep craters have room to reach
+    // the true screen bottom, but the *default* terrain silhouette should
+    // stay exactly where it was dialled in (054a019) — this is that
+    // baseline's old effective value (lerp(80, 550, 0.9)) kept as-is.
+    private static final double BASELINE_HEIGHT = 503.0;
+
     private TerrainGenerator() {
     }
 
@@ -51,12 +58,12 @@ public final class TerrainGenerator {
         }
         double[] work = new double[size + 1];
 
-        // Baseline sits low (near FLOOR), not at the vertical midpoint: flat-ish
-        // terrain should only occupy roughly the bottom 10% of the screen,
-        // leaving headroom above to see weapon arcs and, later, for hills/
-        // mountains to rise up toward CEILING without the whole map feeling
-        // like a wall of dirt by default.
-        double baseHeight = lerp(Terrain.CEILING, Terrain.FLOOR, 0.9);
+        // Baseline sits low (near BASELINE_HEIGHT), not at the vertical
+        // midpoint: flat-ish terrain should only occupy roughly the bottom
+        // 10% of the screen, leaving headroom above to see weapon arcs and,
+        // later, for hills/mountains to rise up toward CEILING without the
+        // whole map feeling like a wall of dirt by default.
+        double baseHeight = BASELINE_HEIGHT;
         work[0] = baseHeight + (rng.nextDouble() - 0.5) * INITIAL_DISPLACEMENT;
         work[size] = baseHeight + (rng.nextDouble() - 0.5) * INITIAL_DISPLACEMENT;
 

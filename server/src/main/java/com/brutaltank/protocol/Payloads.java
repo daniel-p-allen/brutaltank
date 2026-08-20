@@ -205,6 +205,26 @@ public final class Payloads {
         }
     }
 
+    /**
+     * One tank whose ground gave way this shot (crater/gully undermined it,
+     * or the post-crater slope-settle pass ate the ground under it) and
+     * dropped to the new terrain level. Position-only — any resulting fall
+     * damage is folded into {@link ShotResolved#damageEvents} instead, so a
+     * tank that's both blasted and falls gets one consistent health change.
+     */
+    public static final class TankFall {
+        public String playerId;
+        public double newY;
+
+        public TankFall() {
+        }
+
+        public TankFall(String playerId, double newY) {
+            this.playerId = playerId;
+            this.newY = newY;
+        }
+    }
+
     /** One cash-credit entry inside {@link ShotResolved}. */
     public static final class CashEarned {
         public String playerId;
@@ -228,6 +248,7 @@ public final class Payloads {
         public TerrainDelta terrainDelta;
         public List<DamageEvent> damageEvents;
         public List<CashEarned> cashEarned;
+        public List<TankFall> tankFalls;
 
         public ShotResolved() {
         }

@@ -18,6 +18,16 @@ export interface PendingShotAnimation {
 	impact: Point;
 	/** performance.now() timestamp when this animation was queued. */
 	startedAtMs: number;
+	/**
+	 * Terrain heights and per-player health/alive exactly as they were
+	 * before this shot's delta was applied. matchStore applies state
+	 * immediately on receipt (so subsequent TurnStarted/RoundEnded messages
+	 * don't need to be buffered), but GameCanvas renders these "before"
+	 * values for the duration of the flight animation instead, so the
+	 * crater/damage don't visibly appear before the projectile gets there.
+	 */
+	preShotHeights: number[];
+	preShotHealth: Record<string, { health: number; alive: boolean }>;
 }
 
 export const pendingShotAnimation = writable<PendingShotAnimation | null>(null);
