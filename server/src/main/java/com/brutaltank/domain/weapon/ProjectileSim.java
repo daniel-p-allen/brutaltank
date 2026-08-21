@@ -211,7 +211,15 @@ public final class ProjectileSim {
         double vy = -power * Math.sin(angleRad) * POWER_SCALE * powerScaleMultiplier;
         double x = startX;
         double y = startY;
-        double windAccel = windStrength * WIND_ACCEL_PER_STRENGTH;
+        // Per user feedback, 2026-08-22: "wind should play a part on weight of
+        // the weapon, heavy weapons are less effected" — reuses the same
+        // gravityMultiplier already driving each weapon's weight class/star
+        // rating (WeaponDef.java) rather than adding a separate knob: a
+        // heavier weapon (gravityMultiplier > 1, e.g. Nuke/Digger/Heavy
+        // Cannonball) gets proportionally less wind push; a lighter one (e.g.
+        // Baby Missile at 0.85) gets more. gravityMultiplier=1.0 (most of the
+        // roster) leaves wind exactly as it was.
+        double windAccel = windStrength * WIND_ACCEL_PER_STRENGTH / gravityMultiplier;
         double gravity = GRAVITY * gravityMultiplier;
 
         List<double[]> path = new ArrayList<>();

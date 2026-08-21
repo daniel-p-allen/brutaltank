@@ -55,7 +55,16 @@ top-level `.game-frame` container in `App.svelte` (player-colored rounded
 border, whole UI framed as one piece) plus the heading doubling as a live
 "Your Turn - Ns" indicator.
 
-**Two real bugs found and fixed this session, worth knowing about:**
+Later the same session: **wind now scales with weapon weight**
+(`ProjectileSim.windAccel` divided by `gravityMultiplier` — heavy weapons
+are pushed less, light ones more, per user feedback), plus a **temporary
+debug-only wind-override slider** (`DevSetWind`/`WindOverridden`, an orange
+"DEBUG Wind" slider in `FireControls.svelte`) added specifically to
+manually verify the wind-direction fix below — **every piece of it is
+commented "TEMPORARY DEBUG-ONLY" and should be stripped out** once that
+verification is done; see its `PLAN.md` Future Ideas entry.
+
+**Four real bugs found and fixed this session, worth knowing about:**
 1. **Shield graphics silently never rendered.** The client only ever learned
    a shield was active from a full `MatchStateSync`, but shields now reset
    every round (per user feedback) — so by the time the next sync arrived,
@@ -72,11 +81,27 @@ border, whole UI framed as one piece) plus the heading doubling as a live
    by passing `strength` straight through (the physics itself, using raw
    `windStrength` server-side, was never wrong — this was a display-only
    bug).
+3. **Fire wasn't ammo-gated.** Only turn/in-flight state disabled Fire, not
+   whether the *selected* weapon had ammo left — a spent weapon could be
+   fired again, and `fireInput.ts` played the launch sound optimistically
+   *before* the server's rejection came back. Fixed with a separate
+   `fireDisabled` in `FireControls.svelte` that also checks `hasAmmo`.
+4. **Shop's round-end overlay never cleared on `ShopOpened`** — stayed
+   stacked on top of the shop UI, silently eating the shop timer underneath
+   it (looked like "the shop randomly times out"). Fixed in `matchStore.ts`'s
+   `applyShopOpened`; also bumped the shop's backup timer 30s -> 120s since
+   `ShopContinue` is now the primary way it ends.
 
-**Two bugs filed but not yet investigated** (`PLAN.md` Future Ideas):
-Digger passing through a tank without registering a hit, and a tank's fall
-animation appearing to trigger before its incoming projectile actually
-lands.
+**Bugs filed but not yet resolved** (`PLAN.md` Future Ideas — read each
+entry there for full investigation notes before touching):
+- Digger passing through a tank without registering a hit.
+- A tank's fall animation appearing to trigger before its incoming
+  projectile actually lands.
+- **Trajectory Help doesn't work for Nuke** (button reads disabled, no
+  preview shown, until a different weapon is selected) — investigated,
+  not resolved; confirmed still reproducing on retest. No root cause found
+  yet; get a screenshot/recording before investigating further, the verbal
+  report supported two different readings once already.
 
 ## Where the weapon/shield research and design work lives
 
@@ -104,9 +129,8 @@ re-researching:
   Kenney.nl) over "royalty-free" libraries that can carry hidden
   attribution/tracking obligations; fall back to procedural synthesis or
   self-recording when nothing suitable exists; every asset's source+license
-  gets recorded in `docs/asset-sources.md` (not created yet — create it
-  alongside the first real asset, not before) so provenance is always
-  auditable.
+  gets recorded in `docs/asset-sources.md` (created — 2 real sourced audio
+  files logged there so far) so provenance is always auditable.
 - **`docs/architecture.md`** is kept as a literal in-sync copy of `PLAN.md`
   per this file's existing instruction — if one has a section the other
   doesn't, that's drift; fix it by copying, don't re-derive content.

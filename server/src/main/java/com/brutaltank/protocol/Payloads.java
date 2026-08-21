@@ -104,6 +104,32 @@ public final class Payloads {
         }
     }
 
+    // TEMPORARY DEBUG-ONLY (per user request, 2026-08-22: "put a temporary
+    // 3rd slider in... so i can zero the wind and check everything") — lets
+    // any connected client override the current turn's wind for manual
+    // testing. Not part of the real game design; safe to delete along with
+    // its client-side slider once the wind-direction fix has been manually
+    // verified.
+    /** Client -> Server: {@code DevSetWind{strength}}. */
+    public static final class DevSetWind {
+        public int strength;
+
+        public DevSetWind() {
+        }
+    }
+
+    /** Server -> Client: {@code WindOverridden{wind}} — broadcast in response to DevSetWind. */
+    public static final class WindOverridden {
+        public WindDto wind;
+
+        public WindOverridden() {
+        }
+
+        public WindOverridden(WindDto wind) {
+            this.wind = wind;
+        }
+    }
+
     /** Server -> Client: {@code MatchStateSync}, the only full-state message. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static final class MatchStateSync {
