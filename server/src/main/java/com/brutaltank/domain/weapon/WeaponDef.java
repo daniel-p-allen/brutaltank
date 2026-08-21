@@ -69,13 +69,23 @@ public record WeaponDef(
     // homingStrength 0.06 (per user feedback: "a little bit of homing just
     // in the end, 6%") — see ProjectileSim.HOMING_ACTIVATION_RADIUS for the
     // "only near the end, only near a target" gating.
+    // gravityMultiplier 0.85 (per user feedback, 2026-08-22: "each weapon
+    // should sit in a weight class consistent with what it is" — a guided
+    // missile is the roster's lightest item, weight-class 1 of 3; see
+    // client WEAPON_CATALOG's weightClass, kept in sync by hand same as
+    // label/id already are) — flies flatter/farther than a dumb-fired shell.
     public static final WeaponDef BABY_MISSILE =
             new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 36.0, 0, 5,
-                    1.15, 1.0, 1.0, 0.0, 20, 0.06);
+                    1.15, 0.85, 1.0, 0.0, 20, 0.06);
 
+    // gravityMultiplier bumped 1.1->1.2 (weight-class 3 of 3, heaviest tier
+    // alongside Digger/Nuke — see BABY_MISSILE's comment). Range at max
+    // power/45deg is still ~3941 world-units, comfortably clearing the
+    // 1600-unit map (per user request: "make sure the heaviest item can be
+    // thrown clear across the field").
     public static final WeaponDef HEAVY_CANNONBALL =
             new WeaponDef("heavy_cannonball", Behavior.STANDARD, 45.0, 80.0, 150, 3,
-                    0.85, 1.1, 1.3, 0.0, 10, 0.0);
+                    0.85, 1.2, 1.3, 0.0, 10, 0.0);
 
     public static final WeaponDef MIRV =
             new WeaponDef("mirv", Behavior.MIRV, 25.0, 30.0, 300, 2,
@@ -113,9 +123,13 @@ public record WeaponDef(
     // craterDepthMultiplier pulled back from 3.0 to 1.8 so maxDepth
     // (radius*0.8*multiplier ~= 55) stays a big-but-not-Nuke-sized pit
     // rather than scaling the old narrow-shaft multiplier straight up.
+    // gravityMultiplier 1.15 (weight-class 3 of 3 — a drill-tipped
+    // penetrator, heaviest tier alongside Heavy Cannonball/Nuke). Range at
+    // max power/45deg is still ~5692 world-units, well clear of the
+    // 1600-unit map.
     public static final WeaponDef DIGGER =
             new WeaponDef("digger", Behavior.TUNNELING, 38.0, 20.0, 120, 3,
-                    1.0, 1.0, 1.8, 0.0, 10, 0.0);
+                    1.0, 1.15, 1.8, 0.0, 10, 0.0);
 
     // Biggest weapon gets the most dramatic terrain: with Terrain.FLOOR's
     // extended headroom, a center hit now plunges close to the true bottom
@@ -124,9 +138,13 @@ public record WeaponDef(
     // damaging if you hit"), now doubled again to 190 along with the rest
     // of the roster — comfortably lethal at range via falloff, not just on
     // a direct hit.
+    // gravityMultiplier 1.25 (weight-class 3 of 3 — the heaviest item in the
+    // roster). Range at max power/45deg is still ~5236 world-units, well
+    // clear of the 1600-unit map (per user request: "make sure the heaviest
+    // item can be thrown clear across the field").
     public static final WeaponDef NUKE =
             new WeaponDef("nuke", Behavior.STANDARD, 90.0, 190.0, 600, 1,
-                    1.0, 1.0, 2.3, 0.0, 3, 0.0);
+                    1.0, 1.25, 2.3, 0.0, 3, 0.0);
 
     private static final Map<String, WeaponDef> WEAPONS_BY_ID = buildWeaponIndex();
 

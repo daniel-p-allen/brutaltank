@@ -41,11 +41,9 @@
 	{#if $matchStore.matchId === null}
 		<p class="waiting">Waiting for match state from server...</p>
 	{:else}
-		{#if $matchStore.activePlayerId}
-			<div class="turn-banner" class:you={activePlayerIsYou}>
-				<span class="turn-label">
-					{activePlayerIsYou ? "Your turn" : `${playerName($matchStore.activePlayerId)}'s turn`}
-				</span>
+		{#if $matchStore.activePlayerId && !activePlayerIsYou}
+			<div class="turn-banner">
+				<span class="turn-label">{playerName($matchStore.activePlayerId)}'s turn</span>
 				{#if remainingTurnSec !== null}
 					<span class="turn-timer" class:urgent={remainingTurnSec <= 5}>{remainingTurnSec}s</span>
 				{/if}
@@ -91,6 +89,8 @@
 				<p class="next-round-note">Next round starting...</p>
 			</div>
 		{/if}
+
+		<p class="weight-legend">★ weight class — heavier (more stars) falls faster and travels less far per power</p>
 	{/if}
 </div>
 
@@ -99,6 +99,16 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+		/* Anchored to GameCanvas's default rendered width (960px) so every
+		   card below the canvas (turn banner, fire controls/weapon-select,
+		   players list) stretches to match it exactly, rather than the
+		   container sizing itself off whichever child happens to be widest —
+		   WeaponSelect's chip row wraps visually but its *unwrapped*
+		   max-content width is much wider than the canvas, which was
+		   silently winning that sizing contest and stretching everything
+		   past the canvas's edge. */
+		width: 960px;
+		max-width: 100%;
 	}
 
 	.waiting {
@@ -115,11 +125,6 @@
 		background: rgba(255, 255, 255, 0.04);
 		font-family: system-ui, sans-serif;
 		font-weight: 600;
-	}
-
-	.turn-banner.you {
-		background: rgba(208, 57, 43, 0.15);
-		outline: 1px solid #d0392b;
 	}
 
 	.turn-timer {
@@ -171,5 +176,12 @@
 		color: #888;
 		font-size: 0.85rem;
 		margin-bottom: 0;
+	}
+
+	.weight-legend {
+		margin: 0;
+		font-family: system-ui, sans-serif;
+		font-size: 0.7rem;
+		color: #777;
 	}
 </style>

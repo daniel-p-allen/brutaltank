@@ -18,11 +18,27 @@
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
 	import { aimStore } from '../../stores/aimStore';
+	import { trajectoryHelpStore } from '../../stores/trajectoryHelpStore';
+	import { hasAmmo } from '../../stores/weaponSelectStore';
+	import { weaponSelectStore } from '../../stores/weaponSelectStore';
 	import WeaponSelect from './WeaponSelect.svelte';
 
 	$: isMyTurn =
 		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
+	$: localPlayer = $matchStore.players.find((p) => p.playerId === $sessionStore.playerId);
+	$: loadout = localPlayer?.loadout ?? {};
+	// disabled (turn/in-flight only) gates weapon *selection* — a weapon
+	// with 0 ammo is separately excluded there via WeaponSelect's own
+	// hasAmmo check per chip, so this must stay ammo-agnostic or every chip
+	// (including ones with ammo left) would wrongly disable together
+	// whenever the *currently selected* weapon happened to be empty.
 	$: disabled = !isMyTurn || $matchStore.awaitingShotResolution;
+	// fireDisabled additionally blocks Fire itself once the *selected*
+	// weapon specifically is out of ammo (per user report, 2026-08-22: Fire
+	// was only turn-gated, so a spent weapon could still be fired again,
+	// sending a shot the server would reject — but only after sendFire had
+	// already optimistically played the launch sound).
+	$: fireDisabled = disabled || !hasAmmo(loadout[$weaponSelectStore]);
 
 	// Broadcasts the local player's live aim angle so every connected client's
 	// tankRenderer can show this tank's barrel tracking it, not just the
@@ -31,7 +47,7 @@
 	$: sendAimUpdate($aimStore.angleDeg);
 
 	function fire(): void {
-		if (disabled) return;
+		if (fireDisabled) return;
 		sendFire($aimStore.angleDeg, $aimStore.power);
 	}
 </script>
@@ -56,8 +72,24 @@
 		<input type="range" min="0" max="100" step="1" bind:value={$aimStore.power} />
 	</label>
 
-	<button class="fire-button" on:click={fire} disabled={disabled}>
-		{$matchStore.awaitingShotResolution ? 'Firing...' : isMyTurn ? 'Fire' : 'Not your turn'}
+	<button
+		type="button"
+		class="trajectory-help-button"
+		class:active={$trajectoryHelpStore}
+		on:click={() => trajectoryHelpStore.toggle()}
+		title="Show a dotted preview of where the shot would land — accounts for the weapon's weight, ignores wind"
+	>
+		Trajectory Help: {$trajectoryHelpStore ? 'On' : 'Off'}
+	</button>
+
+	<button class="fire-button" on:click={fire} disabled={fireDisabled}>
+		{$matchStore.awaitingShotResolution
+			? 'Firing...'
+			: !isMyTurn
+				? 'Not your turn'
+				: !hasAmmo(loadout[$weaponSelectStore])
+					? 'Out of ammo'
+					: 'Fire'}
 	</button>
 </div>
 
@@ -88,8 +120,25 @@
 		direction: rtl;
 	}
 
-	.fire-button {
+	.trajectory-help-button {
 		margin-left: auto;
+		padding: 0.4rem 0.75rem;
+		font-size: 0.8rem;
+		font-weight: 600;
+		border-radius: 6px;
+		border: 1px solid #555;
+		background: #222;
+		color: #aaa;
+		cursor: pointer;
+	}
+
+	.trajectory-help-button.active {
+		border-color: #4a9;
+		background: rgba(74, 170, 153, 0.18);
+		color: #7fd9c4;
+	}
+
+	.fire-button {
 		padding: 0.5rem 1.25rem;
 		font-size: 1rem;
 		font-weight: 600;

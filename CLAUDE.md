@@ -37,6 +37,47 @@ match-lifecycle reference (landscape PDF, also covers where `PLAN.md`'s
 design has drifted from the shipped code — e.g. `Match`'s real
 `synchronized`-based concurrency vs. the plan's `MatchActor`/queue design).
 
+Full weapon sound design shipped this same 2026-08-22 session (see
+`docs/asset-sources.md` for the 2 real sourced audio files' licenses —
+everything else is Web Audio synthesis in `client/src/lib/audio/
+soundManager.ts`). Also shipped that session, in order: economy/damage
+balance pass (every weapon's damage doubled, blast-radius-vs-tank-footprint
+fix, $50 turn-forfeit penalty + $0-cash elimination, a distinct $500
+round-win bonus on top of the $50 survival bonus), shield-round-reset,
+`ShopContinue` (opt-in early-advance, backup timer now 120s not 30s — see
+its own bug note below), MIRV children falling animation, a per-weapon
+weight-class system (`WeaponDef.gravityMultiplier`/`powerScaleMultiplier`,
+3-tier ★ rating mirrored client-side in `weaponSelectStore.WEAPON_CATALOG`
+and shown on each weapon button), an opt-in "Trajectory Help" dotted aim
+preview (`client/src/lib/game/render/trajectoryPreview.ts` — accounts for
+weapon weight, ignores wind, deliberately inaccurate by design), and a
+top-level `.game-frame` container in `App.svelte` (player-colored rounded
+border, whole UI framed as one piece) plus the heading doubling as a live
+"Your Turn - Ns" indicator.
+
+**Two real bugs found and fixed this session, worth knowing about:**
+1. **Shield graphics silently never rendered.** The client only ever learned
+   a shield was active from a full `MatchStateSync`, but shields now reset
+   every round (per user feedback) — so by the time the next sync arrived,
+   the shield was already gone client-side. Fixed by threading
+   `activeShieldId` through `ShotResolved`'s `DamageEvent` (shield
+   activation *and* every subsequent hit now reports the shield's live
+   state) — see `shared/protocol.md`'s `DamageEvent.activeShieldId`.
+2. **Wind indicator arrow was decoupled from the actual physics.**
+   `WindDto.strength` is already signed (matches `ProjectileSim`'s
+   `windAccel` applied straight to `vx`); `directionSign` is just
+   `sign(strength)`. `GameCanvas.svelte` was passing `strength *
+   directionSign` into `WindIndicator`, which squares the sign — the arrow
+   always pointed the same way regardless of actual wind direction. Fixed
+   by passing `strength` straight through (the physics itself, using raw
+   `windStrength` server-side, was never wrong — this was a display-only
+   bug).
+
+**Two bugs filed but not yet investigated** (`PLAN.md` Future Ideas):
+Digger passing through a tank without registering a hit, and a tank's fall
+animation appearing to trigger before its incoming projectile actually
+lands.
+
 ## Where the weapon/shield research and design work lives
 
 This project has accumulated substantial **design research** (real-world +

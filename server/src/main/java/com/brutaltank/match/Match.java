@@ -53,10 +53,18 @@ public final class Match {
     private static final int MAX_TURNS_PER_ROUND = 60;
     private static final int ROUND_SURVIVAL_BONUS = 50;
     private static final int ELIMINATION_BONUS = 100;
+    // Per user request, 2026-08-22: "price for a win should be $500" — a
+    // distinct round-winner prize on top of the flat ROUND_SURVIVAL_BONUS
+    // every surviving player already gets (including the winner).
+    private static final int ROUND_WIN_BONUS = 500;
     static final long DEFAULT_TURN_TIMEOUT_MS = 30_000;
     static final long DEFAULT_RECONNECT_GRACE_MS = 120_000;
-    // M4 (PLAN.md 4.5: "Shop phase duration: 30s, server-enforced").
-    static final long DEFAULT_SHOP_TIMEOUT_MS = 30_000;
+    // M4 (PLAN.md 4.5: "Shop phase duration: 30s, server-enforced") — bumped
+    // to 120s (per user feedback, 2026-08-22: shop "randomly" timing out was
+    // annoying) now that ShopContinue is the primary way a shop phase ends;
+    // this is purely a stall-safety fallback for an AFK-but-still-connected
+    // player, not meant to fire during normal play.
+    static final long DEFAULT_SHOP_TIMEOUT_MS = 120_000;
     private static final String[] COLORS = {
             "#e33", "#33e", "#3e3", "#ee3", "#e3e", "#3ee", "#f80", "#a3f"
     };
@@ -629,6 +637,9 @@ public final class Match {
         for (String pid : aliveIds) {
             players.get(pid).player.cash += ROUND_SURVIVAL_BONUS;
         }
+        if (winnerId != null) {
+            players.get(winnerId).player.cash += ROUND_WIN_BONUS;
+        }
 
         List<Payloads.Standing> standings = new ArrayList<>();
         for (MatchPlayer mp : players.values()) {
@@ -1155,7 +1166,7 @@ public final class Match {
                 Payloads.DamageEvent existing = damageByPlayer.get(p.player.playerId);
                 double cumulativeDamage = (existing != null ? existing.damage : 0.0) + mitigatedDamage;
                 damageByPlayer.put(p.player.playerId,
-                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated));
+                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated, p.player.activeShieldId));
 
                 if (!p.player.playerId.equals(shooter.player.playerId)) {
                     cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
@@ -1194,7 +1205,7 @@ public final class Match {
 
                 Payloads.DamageEvent existing = damageByPlayer.get(dr.playerId());
                 double cumulativeDamage = (existing != null ? existing.damage : 0.0) + mitigatedDamage;
-                damageByPlayer.put(dr.playerId(), new Payloads.DamageEvent(dr.playerId(), cumulativeDamage, newHealth, eliminated));
+                damageByPlayer.put(dr.playerId(), new Payloads.DamageEvent(dr.playerId(), cumulativeDamage, newHealth, eliminated, target.player.activeShieldId));
 
                 if (!dr.playerId().equals(shooter.player.playerId)) {
                     cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
@@ -1245,7 +1256,7 @@ public final class Match {
                 Payloads.DamageEvent existing = damageByPlayer.get(p.player.playerId);
                 double cumulativeDamage = (existing != null ? existing.damage : 0.0) + fallDamage;
                 damageByPlayer.put(p.player.playerId,
-                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated));
+                        new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated, p.player.activeShieldId));
 
                 if (!p.player.playerId.equals(shooter.player.playerId)) {
                     cashFromDamage += (int) Math.round(fallDamage * DamageCalculator.CASH_PER_DAMAGE);

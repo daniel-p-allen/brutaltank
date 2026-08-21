@@ -401,7 +401,14 @@ class WeaponAndShieldTest {
         match.debugSetTankPosition(farAway.playerId(), 1590, 500); // far outside HOMING_ACTIVATION_RADIUS
 
         double angle = 45;
-        double power = 55;
+        // Power kept low (30, was 55) so the arc stays fully contained within
+        // the 1600-unit map and never screen-wraps back toward farAway's
+        // x=1590 — with baby_missile's lighter gravityMultiplier (0.85, per
+        // user feedback: weight-class tuning, 2026-08-22) the old power=55
+        // arc traveled far enough to wrap the map edge and pass within
+        // HOMING_ACTIVATION_RADIUS of farAway mid-flight, nondeterministically
+        // engaging homing and breaking this test's "no target nearby" premise.
+        double power = 30;
         double[] tip = barrelTip(200, 500, angle);
         WeaponDef babyMissile = WeaponDef.byId("baby_missile");
         ProjectileSim.Result pureBallistic = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,

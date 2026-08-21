@@ -11,6 +11,9 @@
 	import { drawTerrain } from '../../game/render/terrainRenderer';
 	import { drawTanks } from '../../game/render/tankRenderer';
 	import { drawShields } from '../../game/render/shieldRenderer';
+	import { computeTrajectoryPreview, drawTrajectoryPreview, WEAPON_PHYSICS } from '../../game/render/trajectoryPreview';
+	import { trajectoryHelpStore } from '../../stores/trajectoryHelpStore';
+	import { weaponSelectStore } from '../../stores/weaponSelectStore';
 	import {
 		drawProjectile,
 		isAnimationFinished,
@@ -56,6 +59,14 @@
 	let activeShot: PendingShotAnimation | null = null;
 	let localPlayerId: string | null = null;
 	let aim: AimState = { angleDeg: 45, power: 60 };
+	let trajectoryHelpEnabled = false;
+	let selectedWeaponId = 'basic_shell';
+
+	// Rough turret-height offset for the preview's launch point — doesn't
+	// need to match tankRenderer's exact barrel-tip geometry since the
+	// preview is already a deliberately-inaccurate guide (per user request:
+	// "it can not be 100 percent accurate otherwise it is not fun").
+	const PREVIEW_LAUNCH_HEIGHT_OFFSET = 17;
 
 	// Tracks which shot's sound sequence has already been triggered, so it
 	// fires exactly once per shot rather than every frame the flight-end
@@ -66,7 +77,11 @@
 	const unsubMatch = matchStore.subscribe((s) => (scene = s));
 	const unsubShot = pendingShotAnimation.subscribe((s) => (activeShot = s));
 	const unsubSession = sessionStore.subscribe((s) => (localPlayerId = s.playerId));
+
+	$: localPlayer = scene.players.find((p) => p.playerId === localPlayerId) ?? null;
 	const unsubAim = aimStore.subscribe((s) => (aim = s));
+	const unsubTrajectoryHelp = trajectoryHelpStore.subscribe((enabled) => (trajectoryHelpEnabled = enabled));
+	const unsubWeaponSelect = weaponSelectStore.subscribe((id) => (selectedWeaponId = id));
 
 	function frame(): void {
 		const ctx = canvasEl?.getContext('2d');
@@ -106,6 +121,31 @@
 			drawTerrain(ctx, heightsToDraw, viewport);
 			drawTanks(ctx, playersToDraw, viewport, aimAngleByPlayerId);
 			drawShields(ctx, playersToDraw, viewport, performance.now());
+
+			if (trajectoryHelpEnabled && localPlayer && localPlayer.tank.alive && !activeShot) {
+				// Defensive: an exception here would otherwise propagate out of
+				// frame() and silently stop the whole rAF loop (the trailing
+				// requestAnimationFrame(frame) call below never runs) — per user
+				// report, 2026-08-22, the preview/toggle appeared to "break" for
+				// Nuke specifically, though no reproducible cause was found in
+				// the physics math itself. This guard at minimum prevents a
+				// single weapon's preview from ever taking the whole canvas down.
+				try {
+					const physics = WEAPON_PHYSICS[selectedWeaponId] ?? { powerScaleMultiplier: 1.0, gravityMultiplier: 1.0 };
+					const points = computeTrajectoryPreview(
+						localPlayer.tank.x,
+						localPlayer.tank.y - PREVIEW_LAUNCH_HEIGHT_OFFSET,
+						aim.angleDeg,
+						aim.power,
+						heightsToDraw,
+						physics.powerScaleMultiplier,
+						physics.gravityMultiplier
+					);
+					drawTrajectoryPreview(ctx, points, viewport);
+				} catch (err) {
+					console.warn('Trajectory preview failed for weapon', selectedWeaponId, err);
+				}
+			}
 
 			if (activeShot) {
 				drawProjectile(ctx, activeShot.trajectory, activeShot.impacts, activeShot.weaponId, elapsed, viewport);
@@ -150,6 +190,8 @@
 		unsubShot();
 		unsubSession();
 		unsubAim();
+		unsubTrajectoryHelp();
+		unsubWeaponSelect();
 	});
 </script>
 
@@ -157,8 +199,19 @@
 	<canvas bind:this={canvasEl} {width} {height} class="game-canvas"></canvas>
 	{#if scene.wind}
 		<div class="wind-overlay">
-			<WindIndicator strength={scene.wind.strength * scene.wind.directionSign} />
+			<!-- wind.strength is already signed (matches server ProjectileSim's
+			     windAccel = windStrength * WIND_ACCEL_PER_STRENGTH, applied
+			     directly to vx) — directionSign is just sign(strength), so
+			     multiplying by it here squared the sign and made the arrow
+			     always point the same way regardless of actual wind direction
+			     (per user report, 2026-08-22: "is that the direction the
+			     projectile is pushed... there was some weird things"). Fixed
+			     by passing strength straight through. -->
+			<WindIndicator strength={scene.wind.strength} />
 		</div>
+	{/if}
+	{#if localPlayer}
+		<div class="cash-overlay">Your Wallet: <span class="cash-amount">${localPlayer.cash}</span></div>
 	{/if}
 </div>
 
@@ -186,5 +239,23 @@
 		position: absolute;
 		top: 0.5rem;
 		right: 0.5rem;
+	}
+
+	.cash-overlay {
+		position: absolute;
+		bottom: 0.5rem;
+		left: 0.5rem;
+		padding: 0.3rem 0.65rem;
+		border-radius: 6px;
+		background: rgba(0, 0, 0, 0.55);
+		border: 1px solid #4a9;
+		font-family: monospace;
+		font-weight: 600;
+		font-size: 0.85rem;
+		color: #ccc;
+	}
+
+	.cash-amount {
+		color: #9fd68a;
 	}
 </style>

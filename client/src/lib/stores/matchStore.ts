@@ -152,6 +152,12 @@ export function applyMatchStateSync(payload: MatchStateSyncPayload): MatchState 
 	};
 }
 
+// Mirrors WEAPON_CATALOG's isShield flags (weaponSelectStore.ts) — kept as a
+// small local set rather than importing that store, since this is the only
+// spot matchStore.ts needs it: detecting a shield-activation "shot" so the
+// shooter's activeShieldId gets patched in (see applyShotResolved below).
+const SHIELD_IDS = new Set(['absorb_shield', 'deflect_shield', 'reflect_shield']);
+
 /** Pure helper (exported for unit testing): patch terrain + player health from a ShotResolved payload. */
 export function applyShotResolved(state: MatchState, payload: ShotResolvedPayload): MatchState {
 	const heights = [...state.terrain.heights];
@@ -172,10 +178,13 @@ export function applyShotResolved(state: MatchState, payload: ShotResolvedPayloa
 		// but without this the client only ever saw it refresh on the next full
 		// MatchStateSync (i.e. the next round) — see ShotResolvedPayload.ammoRemaining.
 		const isShooter = p.playerId === payload.shooterId;
+		const activatedShieldId = isShooter && SHIELD_IDS.has(payload.weaponId) ? payload.weaponId : null;
 		if (!dmg && !fall && !isShooter) return p;
 		return {
 			...p,
 			...(isShooter ? { loadout: { ...p.loadout, [payload.weaponId]: payload.ammoRemaining } } : {}),
+			...(activatedShieldId ? { activeShieldId: activatedShieldId } : {}),
+			...(dmg ? { activeShieldId: dmg.activeShieldId } : {}),
 			tank: {
 				...p.tank,
 				...(dmg ? { health: dmg.newHealth, alive: !dmg.eliminated } : {}),
@@ -231,7 +240,17 @@ export function applyShopOpened(state: MatchState, payload: ShopOpenedPayload): 
 			openedAtMs: Date.now(),
 			stockRemaining: Object.fromEntries(payload.priceList.map((e) => [e.itemId, e.stock]))
 		},
-		shopErrorReason: null
+		shopErrorReason: null,
+		// The round-end overlay served its purpose the moment the shop opens
+		// (its own doc comment says it lingers "until the next
+		// MatchStateSync clears it", but ShopOpened fires immediately after
+		// RoundEnded and MatchStateSync doesn't arrive until the *next*
+		// round starts) — without this, the round-end overlay stayed
+		// stacked on top of ShopOverlay for the player's whole shopping
+		// window, silently eating into the shop's timer while they read a
+		// summary they'd already seen (per user report: shop "randomly"
+		// timing out — the timer was running the whole time, just hidden).
+		roundEndedInfo: null
 	};
 }
 

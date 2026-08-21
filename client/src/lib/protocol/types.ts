@@ -111,6 +111,8 @@ export interface DamageEvent {
 	damage: number;
 	newHealth: number;
 	eliminated: boolean;
+	/** The target's activeShieldId immediately after this hit resolved (null if none/broken). */
+	activeShieldId: string | null;
 }
 
 export interface CashEarned {

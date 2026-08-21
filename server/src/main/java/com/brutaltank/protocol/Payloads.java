@@ -222,15 +222,23 @@ public final class Payloads {
         public double damage;
         public double newHealth;
         public boolean eliminated;
+        /**
+         * The target's activeShieldId immediately after this hit was
+         * mitigated/resolved (null if none) — lets clients learn a shield
+         * broke (or is still holding) without waiting for the next full
+         * MatchStateSync, same reasoning as ShotResolved.ammoRemaining.
+         */
+        public String activeShieldId;
 
         public DamageEvent() {
         }
 
-        public DamageEvent(String playerId, double damage, double newHealth, boolean eliminated) {
+        public DamageEvent(String playerId, double damage, double newHealth, boolean eliminated, String activeShieldId) {
             this.playerId = playerId;
             this.damage = damage;
             this.newHealth = newHealth;
             this.eliminated = eliminated;
+            this.activeShieldId = activeShieldId;
         }
     }
 

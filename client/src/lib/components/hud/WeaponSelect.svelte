@@ -28,7 +28,12 @@
 			on:click={() => weaponSelectStore.select(entry.id)}
 		>
 			<span class="label">{entry.label}</span>
-			<span class="qty">{formatQuantity(qty)}</span>
+			<span class="meta-row">
+				<span class="qty">×{formatQuantity(qty)}</span>
+				{#if entry.weightClass}
+					<span class="weight">{'★'.repeat(entry.weightClass)}</span>
+				{/if}
+			</span>
 		</button>
 	{/each}
 </div>
@@ -46,15 +51,29 @@
 
 	.chip {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: 0.35rem;
-		padding: 0.3rem 0.55rem;
+		gap: 0.2rem;
+		min-width: 6rem;
+		padding: 0.35rem 0.6rem;
 		border-radius: 6px;
 		border: 1px solid #555;
 		background: #222;
 		color: #eee;
 		font-size: 0.8rem;
 		cursor: pointer;
+	}
+
+	.label {
+		white-space: nowrap;
+	}
+
+	.meta-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		gap: 0.5rem;
 	}
 
 	.chip.shield {
@@ -73,10 +92,17 @@
 
 	.qty {
 		font-family: monospace;
+		font-size: 0.75rem;
 		color: #aaa;
 	}
 
 	.chip.selected .qty {
 		color: #fff;
+	}
+
+	.weight {
+		font-size: 0.7rem;
+		letter-spacing: 0.05em;
+		color: #e0a020;
 	}
 </style>

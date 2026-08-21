@@ -318,7 +318,7 @@ Sent only to the requester, echoing their `requestId`.
     "trajectory": [ { "x": 200, "y": 400 }, { "x": 230, "y": 360 }, "... ~30-40 resampled points ..." ],
     "impact": { "x": 640, "y": 388 },
     "terrainDelta": { "startX": 600, "endX": 680, "heights": [390, 388, "... only the affected column range ..."] },
-    "damageEvents": [ { "playerId": "p-1", "damage": 22, "newHealth": 78, "eliminated": false } ],
+    "damageEvents": [ { "playerId": "p-1", "damage": 22, "newHealth": 78, "eliminated": false, "activeShieldId": null } ],
     "cashEarned": [ { "playerId": "p-2", "amount": 110 } ],
     "tankFalls": [ { "playerId": "p-1", "newY": 430 } ],
     "ammoRemaining": 4,
@@ -334,7 +334,7 @@ Sent only to the requester, echoing their `requestId`.
 | `trajectory` | array of `{x,y}` | Resampled to ~30-40 points (not every raw simulation step) to keep the message compact. Client interpolates the projectile animation along these points. |
 | `impact` | `{x,y}` | Final impact/detonation point. |
 | `terrainDelta` | `{startX, endX, heights[]}` | Only the affected column range — the sole mechanism for keeping client terrain in sync outside of `MatchStateSync`. `heights` has `endX - startX + 1` entries. |
-| `damageEvents` | array | One entry per tank affected by the blast (including possible self-damage). `eliminated: true` when `newHealth <= 0`. |
+| `damageEvents` | array | One entry per tank affected by the blast (including possible self-damage). `eliminated: true` when `newHealth <= 0`. `activeShieldId` is that target's shield state immediately after this hit resolved (null if none/broken) — lets clients learn a shield broke (or is still holding) without waiting for the next full `MatchStateSync`. |
 | `cashEarned` | array | One entry per player credited cash from this shot (damage dealt to others × 5, elimination bonus, etc. — see plan section 4.5). |
 | `tankFalls` | array | One entry per tank whose ground gave way this shot (crater/gully undermined it, or a steep cliff it cut settled) and dropped to the new terrain level — `{playerId, newY}`, position-only; any resulting fall damage is folded into `damageEvents` instead. |
 | `ammoRemaining` | integer | The shooter's remaining quantity of `weaponId` after this shot (-1 == unlimited, same convention as `loadout` elsewhere). Lets the client's weapon-select HUD count down live instead of only refreshing on the next `MatchStateSync`. |
