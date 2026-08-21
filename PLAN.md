@@ -258,11 +258,23 @@ This ordering front-loads the highest-risk item (server-authoritative shot resol
 - **Baby Missile: a small terminal-homing nudge, ~6%** (user request, filed not implemented). Idea as discussed: only during the descending half of its arc (past apex), and only once it's already near an enemy tank, bend its velocity direction a little (a ~6% per-tick blend toward the nearest live target) rather than adding true guidance for the whole flight — a small assist on close shots, not a lock-on. Every other weapon stays pure ballistic (see `docs/weapon-gap-analysis.md`, which is what surfaced this idea). Needs a `ProjectileSim` overload carrying a per-weapon `homingStrength` (default 0.0) plus a `WeaponDef` field, without touching the existing call sites used by every other weapon/test.
 - **Per-weapon sound design** (user request, filed not implemented). Real-world/genre sound characteristics for the whole roster are gathered in `docs/weapon-gap-analysis.md`'s "Sound target" line on each weapon. Open question noted there: per-weapon distinct sound design, or a smaller shared set (one "explosion" family + one "launch" family) reused across the roster.
 - **Closing the weapon gap-analysis findings** (see `docs/weapon-gap-analysis.md`): Heavy Cannonball has no kinetic-only (non-exploding) behavior, Napalm has no burn/damage-over-time mechanic, Bouncing Betty skips instead of self-launching, and every weapon currently shares one identical generic explosion effect (no distinct per-weapon look). None of these are scheduled — filed for a future decision on which, if any, are worth closing.
-- **Heavy Cannonball: roll downhill after impact, dealing further impact damage as it goes** (user request, filed not implemented). Idea as discussed: after the first direct hit/impact (kept as-is, that's already "good"), instead of just detonating once, the cannonball should keep rolling along the terrain surface following the downhill slope, dealing additional impact damage on anything it rolls into along the way — closer to the real kinetic/pass-through cannonball behavior noted in the gap analysis than a single-point blast. Needs real scoping before implementation: how far/long it rolls, what stops it (flat ground? a tank? a wall?), whether it re-detonates fully or does a smaller bump of damage per hit, and how that interacts with the existing single-detonation `DetonationSpec` model everything else uses.
+- **Heavy Cannonball: roll downhill after impact, then detonate once** (user request, filed not implemented; scoping substantially advanced by genre research — see `docs/weapon-gap-analysis.md`'s Heavy Cannonball entry). This maps directly onto Scorched Earth's own "Roller" weapon, confirmed via the original manual: *"roll downhill until reaching a valley or a tank. They then explode."* That resolves two of the three original open questions: **what stops it** = a valley (local terrain minimum, i.e. the point where slope changes from downhill to uphill/flat) or a tank; **does it re-detonate fully or partially** = fully, one detonation at the end of the roll — not repeated partial-damage bumps. Still open: how the roll itself is simulated on our 1D heightmap (a discrete step-by-step descent following `Terrain.heightAt`, presumably reusing/extending `ProjectileSim`'s post-impact phase similar to how `TUNNELING`/`BOUNCING` already extend the base loop), and how far/fast it rolls before settling if the terrain never produces a clear valley.
+- **Digger: fizzle (no-op) on a direct tank hit, tunnel-then-blast only on a ground hit** (user request, filed not implemented; scoping advanced by genre research — see `docs/weapon-gap-analysis.md`'s Digger entry). Scorched Earth's own Digger: *"tunnel when they hit ground. If they hit a tank, they fizzle."* Currently a direct tank hit with Digger behaves like every other weapon's direct hit (bonus damage via `DamageCalculator.DIRECT_HIT_MULTIPLIER`); this idea asks for that case to instead do nothing (a dud), reserving the tunnel-and-crater behavior for ground-only hits. Needs scoping: whether "fizzle" means zero damage entirely or some minimal consolation damage, and how it's communicated to the player (a distinct dud sound/visual per the sound-design section below) so a fizzle doesn't just look like a bug.
+- **Sandhog — new weapon, shield-bypass burrower** (surfaced by genre research, not previously filed). Scorched Earth precedent: a Digger variant with *"a small but powerful charge, which can destroy an enemy tank from beneath"*, explicitly useful for *"burrowing beneath enemy shields"*. Would be the first weapon in our roster whose damage ignores `ShieldDef` mitigation entirely. Needs scoping: how "beneath" is detected on a 1D heightmap (likely: detonates directly under a tank's x-position after a short tunnel phase, similar to Tunneling Shot/Digger), and whether it bypasses shields fully or partially.
+- **Tracer — new weapon, non-damaging targeting aid** (surfaced by genre research, not previously filed). Scorched Earth precedent: zero destructive capability; *"the trajectory of each shot fired with tracer will stay on the screen for some time after the shot is made"* — fired purely to preview a trajectory before committing a real shot. We have no non-damaging weapon category today; every `WeaponDef` carries `centerDamage`/`blastRadius`. Needs scoping: whether this consumes a turn like every other `Fire` (matching the existing "shield activation also spends a turn" precedent) or is a free/unlimited aim-preview action layered on top of the existing live `AimUpdate`/`PlayerAiming` broadcast, which already shows aim angle live — a Tracer might be redundant with that unless it specifically previews the *arc*, not just the angle.
+- **Dirt-restoration weapons — new mechanic, terrain-building instead of terrain-destroying** (surfaced by genre research, not previously filed). Scorched Earth family: Dirt Clod/Ball/Ton (*"explode into a sphere of dirt when hitting something"*), Liquid Dirt (*"oozes out wherever it lands, filling holes and smoothing the terrain"*), Dirt Charge, Earth Disrupter. All 10 of our current weapons only carve craters (`Terrain.applyCrater`); there is no terrain-raising operation in `Terrain.java` at all. This is a genuinely new terrain mutation, not a stats variant — needs its own `Terrain.applyFill(...)`-shaped method and real scoping on tactical purpose (denying an opponent's low ground? rebuilding your own cover?).
+- **Riot Charge/Blast/Bomb — new weapon family, self-rescue digging** (surfaced by genre research, not previously filed). Scorched Earth precedent: clears a wedge (Riot Charge/Blast, around your own turret) or sphere (Riot Bomb) of dirt, doing *no damage to tanks* — purely for digging yourself out. Directly complements our existing `tankFalls`/terrain-collapse mechanics (`Match.applyDetonations` already drops a tank when its ground gives way) and would pair naturally with the dirt-restoration idea above (something to dig yourself out of, if that ships first).
+- **Leapfrog — new weapon, sequential (not simultaneous) multi-warhead** (surfaced by genre research, not previously filed). Scorched Earth precedent: *"three warheads which launch one after another"* — distinct from our MIRV's simultaneous apex-split. Would conceptually reuse MIRV's child-launch infrastructure but on a delay/re-trigger basis (fire, wait, re-launch from impact point) rather than a single split moment.
 - **Bouncing Betty: deal damage on each bounce, not just a cosmetic skip mark** (user request, filed not implemented — "not sure how to make this work well but research it more"). Currently every bounce is zero-damage/cosmetic (a skip-mark divot only); the final detonation is the only damage event. Needs real design research before implementing: how much damage per bounce vs. the final hit (a fraction of centerDamage? a fixed small amount?), whether bounce damage uses the same blast-radius falloff against nearby tanks or is direct-hit-only, and how repeated partial-damage events read to a player compared to today's single clean hit. Revisit `docs/weapon-gap-analysis.md`'s Bouncing Betty entry (skip-vs-self-launch gap) when scoping this, since it's the same weapon.
 - **Digger: narrow tunnel along its trajectory, ending in a big hole, then the sides collapse** (user request, filed not implemented). Currently Digger is a single-point-impact weapon (`Behavior.DIGGER`, dispatched like `STANDARD` — it detonates on first terrain contact, no penetration phase at all); its only current signature is a narrow-radius/high-depth-multiplier crater. This request asks for something closer to Tunneling Shot's behavior instead: continue along the trajectory underground first (a real tunneling phase, not just a deep single crater), then a bigger detonation at the end. The post-crater slope-settle pass (`Terrain.settleSlopes`, already runs generically after every shot) may already deliver "then collapse" once the hole is big enough to leave a steep edge — worth checking before building anything new there. Needs scoping: how far it tunnels vs. Tunneling Shot's 160-unit penetration, how much bigger "big hole" means numerically, and whether Digger should just become a Tunneling-Shot variant (small radius, shallow penetration, huge final crater) rather than a distinct behavior.
 - **Nuke: a bigger, more dramatic explosion effect — smoke and fire, not just the shared generic flash** (user request, filed not implemented; damage was bumped 70→95 immediately since that part was a simple number). This is the same root gap already noted for the whole roster ("every weapon currently shares one identical generic explosion effect") but called out specifically for Nuke as the highest-priority one to get a distinct look. Needs real client rendering work (a bigger/longer flash, smoke particles, maybe a fire-colored palette) — worth deciding whether to build this Nuke-only first or as part of giving every weapon its own explosion look at once.
 - **Napalm: ground/tank damage over time, pooling in cavities for ongoing damage while it stays on target** (user request, filed not implemented). Idea as discussed: napalm shouldn't be a single instant hit — it should keep dealing damage on subsequent rounds to the ground and any tank it's touching, with some visual sign of it lingering, and specifically *pool* (collect/deepen) in a cavity/dip in the terrain, doing repeated rounds of damage for as long as it stays pooled there. This is a genuinely new category of mechanic, not a stats tweak — nothing in the engine currently persists any state between turns (every shot resolves fully, synchronously, within one `Match.fire()` call); a lingering/ticking effect would need real scoping: where the persistent state lives, how many turns it lasts, how "pooling in a cavity" is detected/represented on a 1D heightmap, and how repeated damage ticks interact with shields/elimination/shop timing. See `docs/weapon-gap-analysis.md`'s Napalm entry for the real-world burn behavior this is modeling.
+
+**Shields** (all three surfaced by genre research — see `docs/weapon-gap-analysis.md`'s "Shield Gap Analysis" section; the visual/sound plan for the current 3 shields is decided, see section 7.4 above — these are the *mechanics* questions the research raised, explicitly speculative, none of them recommendations):
+
+- **Absorb: a random per-hit failure chance, like Scorched Earth's base-tier Shield** (surfaced by genre research, not previously filed). Scorched Earth's cheapest shield tier has a small documented chance to simply fail to absorb a hit at all, distinguishing it from the top tier's guaranteed reliability; ours is fully deterministic. Purely speculative — would make our cheapest shield riskier, which may or may not be a texture worth adding.
+- **Reflect's price/tier ordering vs. Scorched Earth's precedent** (surfaced by genre research, not previously filed). Scorched Earth's most expensive tier (Heavy Shield) is framed as the strongest/most reliable; our most expensive shield (Reflect, 300) has the *mildest* raw percentage mitigation (-30%, vs. Absorb's -50%) of the three, with its value proposition instead being the 20% cashback. Whether shop price should track raw shield strength, or whether the cashback mechanic is sufficient justification for its price as-is, is an open design question, not a finding that something's wrong.
+- **A fourth, Heavy-Shield-equivalent top tier** (surfaced by genre research, not previously filed). Scorched Earth had three purchasable shield tiers; ours has three shields but they map more to "three different mechanics" than "three tiers of the same mechanic." Flagged only because the research surfaced it — not a claim that three shields is insufficient.
 
 ---
 
@@ -286,6 +298,175 @@ This ordering front-loads the highest-risk item (server-authoritative shot resol
   - M3/M4: play a full match across all weapons and a shop cycle with ≥3 tabs, confirm no cash/loadout desync.
 - Add a togglable structured server-side debug log (one line per `MatchCommand`/`MatchEvent`) to trace a specific match's event sequence when debugging desyncs.
 - Optional later: a small Java WS test client that scripts N simulated players joining/firing randomly, to fuzz-test `MatchActor` under concurrent load without human testers.
+
+---
+
+## 7. Audio & Visual Signature System
+
+Currently every weapon shares one identical generic explosion effect (an
+orange flash, radius 6→26 over 250ms — see `docs/weapon-gap-analysis.md`'s
+baseline gap note) and **there is no audio in the codebase at all** (verified:
+no `Audio`/`.mp3`/`.ogg`/`.wav` reference anywhere under `client/src`). This
+section is the implementation plan for closing both gaps — colors/visuals
+and sound — for the weapon roster (including the new weapons filed above)
+and, secondarily, shields and key UI moments. It is a plan, not yet
+implemented; nothing in this section has shipped.
+
+### 7.1 Visual signature per weapon
+
+**Goal**: each weapon reads as visually distinct on detonation, not just by
+crater shape (which already varies — see `WeaponDef.craterDepthMultiplier`)
+but by the explosion effect itself. Palette choices below are grounded in
+each weapon's researched real-world/genre character from
+`docs/weapon-gap-analysis.md`, not arbitrary:
+
+| Weapon | Explosion character | Color direction |
+|---|---|---|
+| Basic Shell / Baby Missile | plain shell burst (the reference case) | current orange flash, unchanged |
+| Heavy Cannonball | heavier, blunter burst; a rolling phase (if built) wants a dust-trail smear along its path | dull grey-brown, less "fire" than a shell |
+| MIRV / Cluster Bomb | already multi-point (`allImpacts`) — needs each child impact to flash, not just the shared point | keep shell-orange per child, no new color needed |
+| Napalm | sustained, spreading, incendiary | orange→dark red gradient, wider/longer-lived than a shell flash |
+| Tunneling Shot / Digger | muffled, most of the energy goes into the ground | dust/earth-brown puff at the bore-track marks, dulled flash at final detonation |
+| Digger fizzle (new, §above) | anticlimactic dud | a small grey puff + dim spark, deliberately *not* a bright flash — sells "this one didn't work" |
+| Bouncing Betty | mid-air airburst distinct from a ground hit | brighter/whiter flash than a ground detonation, since it detonates above the surface |
+| Nuke | already scoped as the highest-priority distinct effect (filed above) | white-hot core → orange → smoke, bigger radius and longer duration than every other weapon |
+| Sandhog (new) | detonates from beneath — genre precedent bypasses shields | flash originates *below* the tank sprite, not at ground level, to visually sell "from beneath" |
+| Tracer (new) | non-damaging, no explosion at all | a thin persistent line along the trajectory, no flash |
+| Dirt-restoration family (new) | terrain rising, not cratering | brown/tan mound-forming particle burst, inverse motion (upward/outward) from every destructive weapon's burst |
+
+**Code path**: today, `GameCanvas.svelte`'s render loop reads
+`pendingShotAnimation` (`shotAnimationStore.ts`) and calls one hardcoded
+explosion draw. This needs a new per-weapon config table — e.g.
+`client/src/lib/game/render/weaponVisuals.ts` exporting a
+`Record<weaponId, { flashColor, flashDurationMs, particleStyle, ringVsBurst }>`
+— read by a new `explosionRenderer.ts` (splitting explosion drawing out of
+the generic projectile/impact draw path), keyed by `payload.weaponId` from
+`ShotResolved`/`shotAnimationStore`'s already-carried `weaponId` field (no
+protocol change needed — the data is already there, just unused for this
+purpose).
+
+### 7.2 Sound design per weapon
+
+Per-weapon "Sound target" lines are already researched in
+`docs/weapon-gap-analysis.md` for all 10 current weapons, plus the new
+Digger-fizzle and Cannonball-roll targets added above. Open question from
+`PLAN.md`'s original Future Ideas note — **fully distinct per-weapon sounds,
+or a smaller shared family set reused across the roster** — is resolved here
+in favor of **shared families**, matching the same simplification philosophy
+already used for visuals (`~6 projectile sprites covering 10 weapons by
+category`, per section 3.3): a small hobby project gets more value from 5-6
+well-made shared sounds than 10+ thin/sample-y unique ones. Proposed
+families, each mapped from the gap-analysis research:
+
+1. **Light shell** (fire crack + impact thump) — Basic Shell, Baby Missile, MIRV children, Cluster bomblets.
+2. **Heavy shell** (deeper/louder version of #1) — Heavy Cannonball, Nuke's initial bang.
+3. **Missile whoosh** (sustained launch, not a crack) — Baby Missile's launch specifically (shares #1's impact).
+4. **Muffled/underground** (dulled boom) — Tunneling Shot, Digger's real detonation.
+5. **Dud** (anticlimactic, no boom) — Digger's fizzle-on-tank-hit.
+6. **Incendiary whoosh-crackle** — Napalm.
+7. **Two-phase rumble** (sharp bang, then a long low rumble) — Nuke's follow-through (layers with #2's initial bang).
+8. **Airburst** (propellant pop, then a separate mid-air bang ~0.5s later) — Bouncing Betty.
+
+**Code path**: a new `client/src/lib/audio/soundManager.ts` — a small pool of
+preloaded `HTMLAudioElement`s (or Web Audio `AudioBufferSourceNode`s if
+overlapping/latency becomes an issue; not needed at this scale to start)
+keyed by family name, with a `playFor(weaponId, event: 'launch'|'impact')`
+function that looks up weapon→family in a new config table (parallel to
+§7.1's visual table, could live in the same file). Triggered from the same
+place `shotAnimationStore`/`GameCanvas` already handles `ShotResolved` — no
+protocol change needed. **Browser autoplay policy**: audio can't play before
+a user gesture; unlock the `AudioContext`/first play on the player's first
+`Fire` click (already a user gesture) rather than on page load. Add a mute
+toggle (persisted to `localStorage`, not a new store dependency) since not
+every player wants sound.
+
+### 7.3 Asset sourcing & licensing policy
+
+Preference order, in this order every time an asset is needed:
+
+1. **Search first for a suitable existing sound**, restricted to
+   genuinely unencumbered licenses — **CC0 / public domain only**, not
+   merely "royalty-free" (royalty-free commercial libraries can still
+   require attribution, restrict redistribution, or bundle a delivery
+   SDK/tracking). Good sources: **Freesound.org** (filter search results to
+   the CC0 license explicitly, not just sorted by popularity), **OpenGameArt.org**
+   (filter to CC0), **Kenney.nl** audio packs (explicitly CC0, made
+   specifically for games — a strong first stop given how well it fits this
+   project's scope).
+2. **If nothing suitable exists, make our own.** For a retro-styled
+   artillery game, simple procedural synthesis (Web Audio `OscillatorNode`/
+   noise generation for cracks, thumps, whooshes) is a legitimate and
+   actually well-suited option — zero licensing risk, tiny footprint, and a
+   good stylistic fit. Self-recorded audio is the other fallback.
+3. **Never use an asset whose license or provenance can't be verified.**
+   Before any audio file is committed to the repo:
+   - Confirm the license on the **hosting site's actual license page for
+     that specific file**, not just an aggregator search-result label
+     (labels are sometimes wrong).
+   - Prefer a file with a named author and an explicit CC0/public-domain
+     grant over vague "free for personal use" or unlabeled "royalty free"
+     claims — those can still carry legal encumbrance, which is the
+     "trackable back to a restrictive source" risk to avoid.
+   - Record every sourced asset's origin URL + license in a new
+     `docs/asset-sources.md` manifest at the time it's added — filename,
+     source URL, license, date — so provenance is always auditable and any
+     asset can be pulled later if a source turns out to be misattributed.
+   - Self-synthesized/self-recorded assets get a manifest entry too (marked
+     "original," no external source), so the manifest is a complete
+     accounting of every audio file in the repo, not just the sourced ones.
+
+**File organization**: new `client/src/assets/audio/` directory (mirrors the
+existing `assets/` plan from section 3.1), compressed format (`.ogg`
+preferred, `.mp3` fallback for broader codec support), small file counts
+given the ~8 shared families above rather than per-weapon uniqueness.
+
+### 7.4 Shields — visual/sound signature
+
+Researched in full in `docs/weapon-gap-analysis.md`'s "Shield Gap Analysis"
+section (Scorched Earth's Shield/Force Shield/Heavy Shield tiers as genre
+precedent, Trophy APS/explosive-reactive-armor as the real analog for
+Deflect specifically). Today all three shields resolve as an identical
+flash-free "no-op `ShotResolved`" — zero visual, zero sound, no readout of
+remaining capacity. Research-backed plan, by shield:
+
+- **Absorb**: rising electronic hum/whine on activation (0.3-0.5s) paired
+  with a translucent dome/ring around the tank sprite — a shader-rendered
+  version of Scorched Earth's own reference UI (*"a circle will appear
+  around your tank"*). A crackle/zap on each absorbed hit, layered under the
+  existing generic blast SFX rather than replacing it (the incoming shot
+  still detonates against the shield, just for less). A lower "power-down"
+  fizzle on break, dome visibly shattering rather than vanishing. Optional:
+  scale the crackle's intensity/pitch as cumulative absorbed damage climbs
+  toward `ABSORB_BREAK_THRESHOLD=80`, giving players an audible read on
+  "this shield's close to failing" without a numeric readout.
+- **Deflect**: same dome-stand-up activation language as Absorb (players
+  should recognize "a shield is up" at a glance regardless of type), but a
+  tighter/harder-edged shader — faceted rather than Absorb's soft glow, to
+  read as a hard block. Since Deflect's absorb-and-break are always the
+  same single moment, combine them into one event: a bright, fast metallic
+  "ping"/energy-crackle burst simultaneous with the dome shattering outward.
+- **Reflect**: same base dome/hum language, tinted/textured differently
+  (a warmer color, since this is the economy-integrated shield) to
+  distinguish it from Absorb at a glance. A milder crackle on the hit itself
+  (matching its milder -30% mitigation), then — this is the one shield
+  moment that isn't purely combat feedback — a distinct short "cha-ching"/
+  coin-chime cue on the *following turn* when the 20% cashback is credited,
+  kept as its own sound family entirely (not the shield-audio family) so
+  the economic payoff doesn't get lost inside the next turn's generic UI.
+
+**Code path**: same `weaponVisuals.ts`/`soundManager.ts` infrastructure from
+§7.1/7.2, extended to cover `shieldId` alongside `weaponId` — the "dome"
+visual is a new render primitive (a persistent overlay while
+`activeShieldId` is set, not a one-shot flash like a weapon explosion) that
+`GameCanvas.svelte` would need to draw every frame a shield is active, not
+just at the moment of activation.
+
+### 7.5 Other UI moments
+
+Smaller follow-on scope: a few key non-shield/weapon UI moments (turn-start
+notification, round-end, a shop purchase confirmation) are natural
+candidates for the same `soundManager` once it exists. Not scoped further
+here — revisit once §7.1-7.4 land.
 
 ---
 

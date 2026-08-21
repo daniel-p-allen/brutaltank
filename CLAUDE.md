@@ -21,21 +21,51 @@ globbing for them.
 
 ## Current status
 
-Built through M3 (full weapon roster + shields) plus a live-playtest polish
-pass (terrain/damage animation sync, deep craters reaching the true screen
-bottom, terrain collapse + tank fall damage, per-weapon terrain signatures,
-a MIRV trajectory bug, wind tuning/indicator). See `PLAN.md` section 5 for
-the milestone definitions.
-
-**M4 (shop/economy) is in progress.** Server-side is done and tested
-(`Match.openShop`/`purchase`, `BrutalTankServer.handleShopPurchase`,
-`ShopTest.java`): `RoundEnded` now opens a timed shop phase before the next
-round (unless the match just ended) instead of transitioning immediately.
-Includes a shared, match-wide **stock** limit per item (not in the original
-protocol.md table — see `WeaponDef.shopStock`/`ShieldDef.shopStock`, added
+Built through **M4** (shop/economy) — both server and client sides,
+including the shop UI (`ShopOverlay.svelte`/`ShopItemCard.svelte` under
+`client/src/lib/components/shop/`, wired to `ShopOpened`/`ShopUpdate`/
+`ShopPurchase`) and the shared match-wide stock pool
+(`WeaponDef.shopStock`/`ShieldDef.shopStock`, `Match.purchase()`'s
+`OUT_OF_STOCK` rejection — not in the original `protocol.md` table, added
 per user feedback: "the shop should not be unlimited in stock... this plays
-into tactics"). **Client-side shop UI is not built yet** — that's the
-remaining M4 work (`ShopOverlay.svelte` + weapon/shield cards under
-`client/src/lib/components/shop/`, per `PLAN.md` section 3.1's component
-list, wired to the now-implemented `ShopOpened`/`ShopUpdate`/`ShopPurchase`
-messages).
+into tactics"). Plus a live-playtest polish pass (terrain/damage animation
+sync, deep craters, terrain collapse + tank fall damage, per-weapon terrain
+signatures, live per-player aim broadcast, a disconnect/round-end fix). See
+`PLAN.md` section 5 for the milestone definitions, and
+`docs/brutaltank-blueprint.pdf` for a verified architecture/UML +
+match-lifecycle reference (landscape PDF, also covers where `PLAN.md`'s
+design has drifted from the shipped code — e.g. `Match`'s real
+`synchronized`-based concurrency vs. the plan's `MatchActor`/queue design).
+
+## Where the weapon/shield research and design work lives
+
+This project has accumulated substantial **design research** (real-world +
+genre precedent, mainly from Scorched Earth) that is easy to lose track of
+across sessions — check here first before assuming something needs
+re-researching:
+
+- **`docs/weapon-gap-analysis.md`** — per-weapon (all 10) and per-shield
+  (Absorb/Deflect/Reflect) research: real-world/genre "should be" vs. what
+  our code actually does, with an explicit gap and a sound-design target for
+  each. This is where the Scorched Earth "Roller"/"Sandhog"/"Riot"/etc.
+  precedent research lives, and it directly informs several items below.
+- **`PLAN.md` section 5, "Future ideas"** — every weapon/gameplay idea the
+  user has raised that isn't built yet, each with open scoping questions (or,
+  where the gap-analysis research has answered some of those questions
+  already, that's noted inline). Includes newly-surfaced weapon concepts from
+  genre research that were never explicitly requested but came up naturally
+  (Sandhog, Tracer, Dirt-restoration weapons, Riot self-rescue, Leapfrog) —
+  these are filed as candidates, not committed work.
+- **`PLAN.md` section 7, "Audio & Visual Signature System"** — the
+  actual implementation plan (not just research) for giving each weapon/
+  shield a distinct color and sound, including the asset-sourcing policy:
+  prefer existing CC0/public-domain sources (Freesound.org, OpenGameArt.org,
+  Kenney.nl) over "royalty-free" libraries that can carry hidden
+  attribution/tracking obligations; fall back to procedural synthesis or
+  self-recording when nothing suitable exists; every asset's source+license
+  gets recorded in `docs/asset-sources.md` (not created yet — create it
+  alongside the first real asset, not before) so provenance is always
+  auditable.
+- **`docs/architecture.md`** is kept as a literal in-sync copy of `PLAN.md`
+  per this file's existing instruction — if one has a section the other
+  doesn't, that's drift; fix it by copying, don't re-derive content.
