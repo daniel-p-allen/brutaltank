@@ -8,7 +8,7 @@ import type { FirePayload } from '../../protocol/types';
 import { matchStore } from '../../stores/matchStore';
 import { weaponSelectStore } from '../../stores/weaponSelectStore';
 import { get } from 'svelte/store';
-import { unlockAudio } from '../../audio/soundManager';
+import { unlockAudio, playLaunch } from '../../audio/soundManager';
 
 /** Retained for tests/back-compat; the live default lives in weaponSelectStore.ts. */
 export const HARDCODED_WEAPON_ID = 'basic_shell';
@@ -22,6 +22,7 @@ export function sendFire(angleDeg: number, power: number): string {
 	const weaponId = get(weaponSelectStore);
 	const payload: FirePayload = { weaponId, angleDeg, power };
 	const envelope = buildEnvelope('Fire', payload, requestId);
+	playLaunch(weaponId);
 	wsClient.sendJson(envelope);
 	matchStore.markFireSent();
 	return requestId;

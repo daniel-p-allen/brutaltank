@@ -254,6 +254,7 @@ This ordering front-loads the highest-risk item (server-authoritative shot resol
 
 ### Future ideas (post-v1, not yet scheduled into a milestone)
 
+- **HUD/UI visual overhaul — current UI is placeholder-quality and needs a real design pass** (user request, filed not implemented, flagged via screenshot). Current state: inconsistent button widths (weapon-select buttons and shield buttons are different sizes with no shared sizing rule), inconsistent/sharp corner radii across cards, weak visual hierarchy (turn banner, weapon bar, and fire controls all compete rather than guide the eye), no real color/type system tying the pieces together — reads as unstyled browser defaults rather than a designed game HUD. User's explicit ask: consistent widths, rounded edges throughout, and to look at how other games (genre-appropriate — Scorched Earth/Worms/Pocket Tanks-style artillery games, and turn-based games generally) handle HUD layout for real design inspiration rather than inventing from scratch. Scope: `client/src/lib/components/hud/` (`FireControls.svelte`, `WeaponSelect.svelte`), `client/src/lib/components/shop/` (`ShopOverlay.svelte`, `ShopItemCard.svelte`), `MatchScreen.svelte`'s turn banner/round-end overlay, and `App.svelte`'s top-level layout — effectively a full HUD pass, not a single-component fix. Needs a real design plan (palette, type scale, spacing/sizing system, component treatment) before touching CSS wholesale, not ad-hoc tweaks to individual buttons.
 - **Single-player mode + a bot opponent** (user request, noted for future reference). Not scoped yet — would need at minimum a bot decision loop (pick a weapon/angle/power against the current terrain+opponent state) that can act through the same server-authoritative `Match.fire()` path a human player uses, so it doesn't need its own parallel code path. Revisit once the human-multiplayer game loop (through at least M4) is solid.
 - **Baby Missile: a small terminal-homing nudge, ~6%** (user request, filed not implemented). Idea as discussed: only during the descending half of its arc (past apex), and only once it's already near an enemy tank, bend its velocity direction a little (a ~6% per-tick blend toward the nearest live target) rather than adding true guidance for the whole flight — a small assist on close shots, not a lock-on. Every other weapon stays pure ballistic (see `docs/weapon-gap-analysis.md`, which is what surfaced this idea). Needs a `ProjectileSim` overload carrying a per-weapon `homingStrength` (default 0.0) plus a `WeaponDef` field, without touching the existing call sites used by every other weapon/test.
 - **Per-weapon sound design** (user request, filed not implemented). Real-world/genre sound characteristics for the whole roster are gathered in `docs/weapon-gap-analysis.md`'s "Sound target" line on each weapon. Open question noted there: per-weapon distinct sound design, or a smaller shared set (one "explosion" family + one "launch" family) reused across the roster.
@@ -323,6 +324,24 @@ per the sourcing policy in §7.3 below (synthesis was the deliberate choice
 for this single-weapon pilot; sourcing real CC0 assets for the rest of the
 roster is the natural next step once this pilot's approach is confirmed by
 playtest). Everything else in this section remains a plan, not yet built.
+
+**Sound shipped for the full weapon roster.** Following the pilot, every
+weapon's launch/impact sound was iterated live against user feedback (on a
+throwaway preview board, not committed) and the confirmed picks landed in
+`client/src/lib/audio/soundManager.ts`: Basic Shell/MIRV/Napalm/Tunneling
+Shot/Digger share the light-shell crack+thump family; Baby Missile gets its
+whoosh (also reused, unmodified, as Cluster Bomb's per-bomblet explosion —
+a deliberate cross-weapon reuse, not a new sound); Heavy Cannonball gets the
+heavy-shell family; Tunneling Shot/Digger get a dirt-scrape-then-muffled-
+boom sequence; Cluster Bomb gets its own mortar-tube launch thunk and a
+rebuilt canister-pop (the first version read as a game blip, not an
+explosion); Nuke is the richest — a real public-domain air-raid-siren
+recording from launch (5s, fades out), a real falling-bomb-whistle
+recording for the final descent, and a reworked lightning-crack + rumble on
+impact (see `docs/asset-sources.md` for the two real-recording sources and
+licenses). Visual signatures (§7.1 below) were **not** part of this pass —
+only Nuke and Bouncing Betty have distinct visuals; the rest of the roster
+still shares the generic flash, which remains a plan.
 
 ### 7.1 Visual signature per weapon
 

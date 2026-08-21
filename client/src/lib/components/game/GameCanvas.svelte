@@ -15,7 +15,7 @@
 		isAnimationFinished,
 		PROJECTILE_ANIMATION_DURATION_MS
 	} from '../../game/render/projectileRenderer';
-	import { play as playSound } from '../../audio/soundManager';
+	import { playImpacts, playRicochet } from '../../audio/soundManager';
 	import WindIndicator from './WindIndicator.svelte';
 	import type { MatchState } from '../../stores/matchStore';
 	import type { PendingShotAnimation } from '../../stores/shotAnimationStore';
@@ -109,20 +109,21 @@
 
 				// Sound, once per shot, right as the flight animation ends and
 				// the impact effects start (matches drawProjectile's own
-				// flashElapsed=0 moment). Bouncing Betty only for this pilot —
-				// a short staggered ricochet-per-bounce sequence ending in the
-				// real detonation thump, rather than everything firing at once.
-				if (
-					activeShot.weaponId === 'bouncing_betty' &&
-					elapsed >= PROJECTILE_ANIMATION_DURATION_MS &&
-					soundedShot !== activeShot
-				) {
+				// flashElapsed=0 moment). Bouncing Betty keeps its own staggered
+				// ricochet-per-bounce sequence (from the pilot); every other
+				// weapon's impact sequencing (staggered bomblets, scrape-then-
+				// boom, etc.) is handled inside soundManager.playImpacts itself.
+				if (elapsed >= PROJECTILE_ANIMATION_DURATION_MS && soundedShot !== activeShot) {
 					soundedShot = activeShot;
-					const bounceCount = Math.max(0, activeShot.impacts.length - 1);
-					for (let i = 0; i < bounceCount; i++) {
-						setTimeout(() => playSound('ricochet'), i * 90);
+					if (activeShot.weaponId === 'bouncing_betty') {
+						const bounceCount = Math.max(0, activeShot.impacts.length - 1);
+						for (let i = 0; i < bounceCount; i++) {
+							setTimeout(() => playRicochet(), i * 90);
+						}
+						setTimeout(() => playImpacts('bouncing_betty', 1), bounceCount * 90);
+					} else {
+						playImpacts(activeShot.weaponId, activeShot.impacts.length);
 					}
-					setTimeout(() => playSound('impact_light'), bounceCount * 90);
 				}
 
 				if (isAnimationFinished(elapsed, activeShot.weaponId)) {

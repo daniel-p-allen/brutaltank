@@ -69,3 +69,14 @@ re-researching:
 - **`docs/architecture.md`** is kept as a literal in-sync copy of `PLAN.md`
   per this file's existing instruction — if one has a section the other
   doesn't, that's drift; fix it by copying, don't re-derive content.
+
+## Known open item: HUD/UI needs a real design pass
+
+Flagged by the user via screenshot (2026-08-22) — the current HUD (weapon
+select, fire controls, shop, turn banner) is placeholder-quality:
+inconsistent button widths, inconsistent corner radii, weak visual
+hierarchy, no real design system. Filed in `PLAN.md`'s Future Ideas as
+"HUD/UI visual overhaul" — read that entry for the full scope (which
+components, what the user explicitly asked for: consistent widths, rounded
+edges, genre-appropriate design research first) before starting on it.
+Not started yet.
