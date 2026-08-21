@@ -14,6 +14,15 @@ public final class DamageCalculator {
     public static final double DIRECT_HIT_RADIUS = 8.0;
     public static final double DIRECT_HIT_MULTIPLIER = 1.3;
     public static final int CASH_PER_DAMAGE = 5;
+    // A tank was treated as a bare point for blast falloff (distance to its
+    // exact x,y), with no allowance for its actual physical footprint —
+    // inconsistent with ProjectileSim.TANK_HITBOX_RADIUS (14), already used
+    // for in-flight direct hits. Fixed per user report: a shot landing
+    // visually right next to a tank (within its sprite footprint) but more
+    // than blastRadius from its exact center point dealt zero damage, which
+    // felt wrong given how large the tank actually looks on screen. Blast
+    // distance is now measured from the tank's edge, not its center.
+    public static final double TANK_RADIUS = 14.0;
 
     private DamageCalculator() {
     }
@@ -53,7 +62,8 @@ public final class DamageCalculator {
         for (TankState tank : tanks) {
             double dx = tank.x() - impactX;
             double dy = tank.y() - impactY;
-            double distance = Math.sqrt(dx * dx + dy * dy);
+            double rawDistance = Math.sqrt(dx * dx + dy * dy);
+            double distance = Math.max(0.0, rawDistance - TANK_RADIUS);
             if (distance > blastRadius) {
                 continue;
             }

@@ -230,6 +230,21 @@ Broadcast once when the lobby transitions `WAITING` → `IN_PROGRESS` (all playe
 
 Broadcast to the rest of the match when a player's socket drops or a `Rejoin` succeeds. Does not itself change turn order; if it's the disconnected player's turn, the `TurnManager` handles the timeout/auto-skip separately (see `TurnStarted`, section 4).
 
+#### `TurnForfeited`
+
+```json
+{ "type": "TurnForfeited", "v": 1, "payload": { "playerId": "p-2", "penalty": 50, "newCash": 0, "eliminated": true } }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `playerId` | string | Whose turn timed out without a `Fire`. |
+| `penalty` | integer | Cash deducted (currently always 50). |
+| `newCash` | integer | The player's cash after the penalty, floored at 0. |
+| `eliminated` | boolean | `true` if this penalty brought cash to 0 — bankruptcy elimination, same as a health-based elimination (tank marked dead, excluded from turn order/round-alive checks). No damage/kill credit to anyone; this is self-inflicted, not combat. |
+
+Broadcast to every player whenever a turn's server-enforced timeout (see `TurnStarted.turnTimeoutSec`) elapses without a `Fire` — i.e. a genuine auto-skip, not a player leaving/disconnecting (that path has no penalty). Always followed by the next active player's `TurnStarted` (or `RoundEnded`/`MatchEnded` if this elimination ends the round).
+
 ---
 
 ## 4. Match / turn messages
@@ -373,6 +388,14 @@ Cover the between-round economy phase (`Shop`/`PriceTable`, plan sections 2.3/4.
 | `quantity` | integer | yes | Number of units to buy (shields are typically quantity 1). |
 
 Only accepted while `status == SHOP`; validated server-side against the player's current cash **and the shared stock pool** (see `ShopOpened.priceList[].stock` below). Insufficient funds, insufficient stock, or an out-of-phase purchase gets an `ErrorMsg`/rejection rather than silently failing — rejection codes: `NOT_SHOP_PHASE`, `INSUFFICIENT_CASH`, `OUT_OF_STOCK`, `INVALID_ITEM`, `INVALID_QUANTITY`.
+
+#### `ShopContinue`
+
+```json
+{ "type": "ShopContinue", "v": 1, "payload": {} }
+```
+
+No payload fields. Signals that this player is done shopping (per user feedback — the shop shouldn't be purely timer-driven). Once every **connected, non-departed** player has sent this, the shop ends immediately rather than waiting for `ShopOpened.timeoutSec` to elapse — the timer still runs as an anti-stall safety net (an AFK/disconnected player can't hold the match hostage indefinitely), it's just no longer the primary way a shop phase ends. No direct reply; the round transition (a fresh `MatchStateSync`, or `MatchEnded`) is the observable effect, same as the timeout path.
 
 ### Server → Client
 

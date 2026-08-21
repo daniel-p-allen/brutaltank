@@ -14,9 +14,14 @@ import java.util.Map;
  */
 public record ShieldDef(String shieldId, double damageMultiplier, int price, int shopStock) {
 
-    /** -50% incoming damage while active, breaks once cumulative absorption exceeds 80. */
+    /** -50% incoming damage while active, breaks once cumulative absorption exceeds 160. */
     public static final ShieldDef ABSORB = new ShieldDef("absorb_shield", 0.5, 200, 5);
-    public static final double ABSORB_BREAK_THRESHOLD = 80.0;
+    // Doubled 80->160 alongside WeaponDef's roster-wide damage doubling
+    // (2026-08-22), to preserve the original ~N-hits-before-breaking
+    // durability — otherwise Absorb would break in about half as many hits
+    // as it used to, an unintended side effect of the damage change rather
+    // than a deliberate shield retune.
+    public static final double ABSORB_BREAK_THRESHOLD = 160.0;
 
     /** First direct hit fully negated then breaks; near-miss splash still applies at 60%. */
     public static final ShieldDef DEFLECT = new ShieldDef("deflect_shield", 0.0, 250, 5);

@@ -34,9 +34,14 @@ class DamageCalculatorTest {
 
     @Test
     void damageFallsOffWithDistanceAndZeroAtEdge() {
+        // Raw distances offset by TANK_RADIUS (14, a tank is no longer a bare
+        // point for blast falloff — see DamageCalculator.TANK_RADIUS): "near"
+        // sits at an effective (post-tank-radius) distance of 20, comfortably
+        // between DIRECT_HIT_RADIUS (8) and BLAST_RADIUS (30); "edge" sits at
+        // an effective distance of exactly BLAST_RADIUS.
         List<DamageCalculator.TankState> tanks = List.of(
-                new DamageCalculator.TankState("near", 115, 500, 100),   // distance 15, within blast, outside direct-hit
-                new DamageCalculator.TankState("edge", 130, 500, 100));  // distance 30 == radius, falloff -> 0
+                new DamageCalculator.TankState("near", 134, 500, 100),   // raw 34, effective 20: within blast, outside direct-hit
+                new DamageCalculator.TankState("edge", 144, 500, 100));  // raw 44, effective 30 == radius, falloff -> 0
 
         DamageCalculator.Outcome outcome = DamageCalculator.resolve(
                 "p-1", 100, 500, BLAST_RADIUS, CENTER_DAMAGE, tanks);

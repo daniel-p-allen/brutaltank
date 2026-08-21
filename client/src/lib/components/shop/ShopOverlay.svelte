@@ -8,6 +8,7 @@
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
 	import { WEAPON_CATALOG } from '../../stores/weaponSelectStore';
+	import { sendShopContinue } from '../../game/input/shopInput';
 	import ShopItemCard from './ShopItemCard.svelte';
 
 	const LABEL_BY_ID = new Map(WEAPON_CATALOG.map((w) => [w.id, w.label]));
@@ -15,6 +16,22 @@
 	let now = Date.now();
 	const tickInterval = setInterval(() => (now = Date.now()), 250);
 	onDestroy(() => clearInterval(tickInterval));
+
+	// Per user feedback: the shop shouldn't be purely timer-driven — Continue
+	// lets a player signal they're done, and the server advances early once
+	// everyone connected has. hasContinued resets whenever a new shop phase
+	// opens (tracked by openedAtMs, which changes every time).
+	let hasContinued = false;
+	let lastOpenedAtMs: number | null = null;
+	$: if (shop && shop.openedAtMs !== lastOpenedAtMs) {
+		lastOpenedAtMs = shop.openedAtMs;
+		hasContinued = false;
+	}
+
+	function continueClicked(): void {
+		hasContinued = true;
+		sendShopContinue();
+	}
 
 	$: shop = $matchStore.shop;
 	$: localPlayer = $matchStore.players.find((p) => p.playerId === $sessionStore.playerId);
@@ -30,8 +47,11 @@
 	<div class="shop-overlay">
 		<div class="shop-header">
 			<h3>Shop</h3>
-			<span class="timer" class:urgent={remainingSec <= 5}>{remainingSec}s</span>
+			<span class="timer" class:urgent={remainingSec <= 5}>{remainingSec}s (backup only)</span>
 			<span class="cash">${localPlayer?.cash ?? 0}</span>
+			<button class="continue-btn" disabled={hasContinued} on:click={continueClicked}>
+				{hasContinued ? 'Waiting for others…' : 'Continue'}
+			</button>
 		</div>
 
 		{#if $matchStore.shopErrorReason}
@@ -94,6 +114,23 @@
 		font-family: monospace;
 		color: #9fd68a;
 		font-weight: 600;
+	}
+
+	.continue-btn {
+		font-family: system-ui, sans-serif;
+		font-weight: 600;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.9rem;
+		border-radius: 6px;
+		border: 1px solid #4a9;
+		background: rgba(74, 170, 153, 0.18);
+		color: #7fd9c4;
+		cursor: pointer;
+	}
+
+	.continue-btn:disabled {
+		cursor: default;
+		opacity: 0.6;
 	}
 
 	.section h4 {

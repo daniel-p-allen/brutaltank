@@ -525,7 +525,14 @@ class WeaponAndShieldTest {
 
         double healthAfter = match.healthOf(target.playerId());
         double actualDrop = healthBefore - healthAfter;
-        double expectedDrop = Math.round(bounceDamagePerHit);
+        // Match rounds the resulting HEALTH (Math.round(hp - damage)), not the
+        // damage amount itself — matching that exactly here rather than a
+        // simplified Math.round(bounceDamagePerHit), since those two aren't
+        // always equal at exact .5 boundaries (e.g. centerDamage=50 makes
+        // bounceDamagePerHit=12.5 exactly, where round(100-12.5)=88 but
+        // round(12.5)=13, a 1-point rounding-artifact mismatch — not a real
+        // gameplay bug, just two different, both-correct roundings).
+        double expectedDrop = healthBefore - Math.round(healthBefore - bounceDamagePerHit);
         assertEquals(expectedDrop, actualDrop, 0.01,
                 "expected ~25% of centerDamage from the bounce alone; got a drop of " + actualDrop);
     }
@@ -678,6 +685,14 @@ class WeaponAndShieldTest {
             match.debugSetTerrain(flatTerrain(1600, 500));
             match.debugSetTankPosition(s.ownerId(), 500, 500);
             match.debugSetTankPosition(s.shooterId(), 200, 500);
+            // Top up health before each hit: this test is about the shield's
+            // cumulative-absorption bookkeeping, not elimination — with the
+            // roster-wide damage doubling (2026-08-22), mitigated per-hit
+            // damage against a fixed 100 health pool would otherwise
+            // eliminate the owner in ~4 hits, well before ABSORB_BREAK_THRESHOLD
+            // (also doubled, to preserve the original hits-to-break count) is
+            // reached, since health didn't scale alongside damage.
+            match.debugSetHealth(s.ownerId(), 100);
             match.debugSetWind(0);
             assertTrue(match.fire(s.shooterId(), "rHit" + i, "basic_shell", angle, power).accepted());
             if (match.activeShieldIdOf(s.ownerId()) == null) {

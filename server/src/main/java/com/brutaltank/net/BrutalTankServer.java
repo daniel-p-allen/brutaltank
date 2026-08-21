@@ -135,6 +135,7 @@ public final class BrutalTankServer {
                 case "LeaveMatch" -> lobbyManager.handleLeaveMatch(session);
                 case "Fire" -> handleFire(session, sink, envelope, payloadNode);
                 case "ShopPurchase" -> handleShopPurchase(session, sink, envelope, payloadNode);
+                case "ShopContinue" -> handleShopContinue(session);
                 case "AimUpdate" -> handleAimUpdate(session, payloadNode);
                 default -> LOG.fine("Ignoring unhandled message type: " + envelope.type);
             }
@@ -170,6 +171,17 @@ public final class BrutalTankServer {
         }
         // On success, Match.fire() has already broadcast ShotResolved (and any
         // round/match transition messages) to every connected player itself.
+    }
+
+    private void handleShopContinue(PlayerSession session) {
+        if (session.currentMatchId == null || session.playerId == null) {
+            return;
+        }
+        Match match = matchRegistry.get(session.currentMatchId);
+        if (match == null) {
+            return;
+        }
+        match.shopContinue(session.playerId);
     }
 
     private void handleShopPurchase(PlayerSession session, MessageSink sink, Envelope envelope, JsonNode payloadNode) throws Exception {

@@ -18,6 +18,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -80,6 +82,12 @@ public final class Match {
     // Shared across all players for the current shop phase (M4: shop stock
     // is a match-wide pool, not per-player — see WeaponDef/ShieldDef.shopStock).
     private final Map<String, Integer> shopStockRemaining = new LinkedHashMap<>();
+    // Per user feedback: shop shouldn't be purely timer-driven — a Continue
+    // button lets players signal readiness, advancing early once everyone
+    // connected has clicked it. The timer stays as an anti-stall safety net
+    // (a disconnected/AFK player could otherwise hold the match hostage),
+    // just no longer the primary way a shop phase normally ends.
+    private final Set<String> shopReadyPlayerIds = new java.util.HashSet<>();
     private ScheduledFuture<?> pendingTimeout;
 
     private volatile long turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
@@ -397,6 +405,12 @@ public final class Match {
             mp.player.tank.y = y;
             mp.player.tank.health = STARTING_HEALTH;
             mp.player.tank.alive = true;
+            // Per user feedback: shields (and their visuals) shouldn't carry
+            // over into a new round — fresh terrain, fresh health, fresh
+            // shield state too, whether or not the previous shield had
+            // already broken.
+            mp.player.activeShieldId = null;
+            mp.player.shieldAbsorbedSoFar = 0;
         }
 
         currentTurnIndex = 0;
@@ -444,11 +458,33 @@ public final class Match {
         pendingTimeout = scheduler.schedule(() -> onTurnTimeout(myToken), turnTimeoutMs, TimeUnit.MILLISECONDS);
     }
 
+    // Per user feedback: "if you miss your turn without taking a shot, you
+    // lost 50. if you go to 0 dollars you die and are eliminated." Only
+    // applied on a genuine timeout (this method) — not on the separate
+    // departed-player skip path (resolveTurnAdvance is also called with
+    // resolved==null from removePlayer/handleDisconnect's full-leave case,
+    // where the player is already gone and there's nothing to penalize).
+    private static final int TURN_FORFEIT_PENALTY = 50;
+
     private synchronized void onTurnTimeout(int token) {
         if (status != Status.IN_PROGRESS || token != turnToken) {
             return; // stale: a Fire (or another timeout/disconnect) already resolved this turn
         }
+        applyTurnForfeitPenalty(turnOrder.get(currentTurnIndex));
         resolveTurnAdvance(null, null); // timeout skip: no shot, just advance
+    }
+
+    private void applyTurnForfeitPenalty(String playerId) {
+        MatchPlayer mp = players.get(playerId);
+        if (mp == null || mp.departed || !mp.player.tank.alive) {
+            return;
+        }
+        mp.player.cash = Math.max(0, mp.player.cash - TURN_FORFEIT_PENALTY);
+        boolean eliminated = mp.player.cash <= 0;
+        if (eliminated) {
+            mp.player.tank.alive = false;
+        }
+        broadcast("TurnForfeited", new Payloads.TurnForfeited(playerId, TURN_FORFEIT_PENALTY, mp.player.cash, eliminated));
     }
 
     /**
@@ -621,6 +657,7 @@ public final class Match {
         status = Status.SHOP;
         shopToken++;
         int myShopToken = shopToken;
+        shopReadyPlayerIds.clear();
 
         shopStockRemaining.clear();
         for (WeaponDef w : WeaponDef.all().values()) {
@@ -645,7 +682,40 @@ public final class Match {
         advanceToNextRoundOrEnd();
     }
 
-    /** Per protocol.md: the timeout elapsing always advances, "regardless of purchases made" — no early-exit-on-all-ready shortcut. */
+    /**
+     * Per user feedback ("do not run the timer, there should be a continue
+     * button"): a player signals they're done shopping; once every connected,
+     * non-departed player has, the shop ends immediately rather than waiting
+     * out the timer. The timer itself stays as an anti-stall safety net (an
+     * AFK/disconnected player could otherwise hold the match hostage
+     * indefinitely) — it just isn't the primary way a shop phase ends anymore.
+     */
+    public synchronized void shopContinue(String playerId) {
+        if (status != Status.SHOP) {
+            return;
+        }
+        MatchPlayer mp = players.get(playerId);
+        if (mp == null || mp.departed) {
+            return;
+        }
+        shopReadyPlayerIds.add(playerId);
+
+        boolean allReady = true;
+        for (MatchPlayer p : players.values()) {
+            if (p.departed || !p.connected) {
+                continue; // a departed/disconnected player can't click Continue; don't block on them
+            }
+            if (!shopReadyPlayerIds.contains(p.player.playerId)) {
+                allReady = false;
+                break;
+            }
+        }
+        if (allReady) {
+            cancelPendingTimeout();
+            advanceToNextRoundOrEnd();
+        }
+    }
+
     private void advanceToNextRoundOrEnd() {
         roundNumber++;
         rotateTurnOrder();
@@ -781,10 +851,16 @@ public final class Match {
     private static final double TUNNEL_TRACK_RADIUS = 10.0;
     private static final double BOUNCE_SKIP_MARK_RADIUS = 8.0;
     // Digger reuses Tunneling Shot's TUNNELING behavior (see WeaponDef.DIGGER)
-    // but with its own much shallower penetration depth (vs.
-    // ProjectileSim.TUNNELING_MAX_PENETRATION's 160) so it reads as a short
-    // bore-then-big-crater rather than a long tunnel.
-    private static final double DIGGER_MAX_PENETRATION = 70.0;
+    // but with its own shallower penetration depth than
+    // ProjectileSim.TUNNELING_MAX_PENETRATION's 160, so it reads as a
+    // shorter bore-then-big-crater rather than a long tunnel. Was 70 — per
+    // user feedback ("did not see the terrain go.. it just went into the
+    // terrain"), that read as no tunnel at all, the same complaint
+    // Tunneling Shot itself had before its own penetration was extended
+    // (see ProjectileSim.TUNNELING_MAX_PENETRATION's history). 110 keeps
+    // Digger distinctly shorter than Tunneling Shot while actually reading
+    // as a bore, not a disappearance.
+    private static final double DIGGER_MAX_PENETRATION = 110.0;
     // Fraction of Bouncing Betty's centerDamage dealt at each bounce point to
     // any tank within BOUNCE_DAMAGE_RADIUS (per user feedback: "make it
     // bounce, damage on bounce"). No blast-radius falloff — a bounce is a

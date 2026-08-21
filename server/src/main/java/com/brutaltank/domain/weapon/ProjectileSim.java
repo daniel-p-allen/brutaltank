@@ -77,13 +77,12 @@ public final class ProjectileSim {
     public static final double BOUNCING_STEEP_TIER_DEG = 60.0;
     public static final double BOUNCING_ENERGY_RETENTION = 0.6;
     // Horizontal speed also bleeds off each bounce (per user feedback: "the
-    // speed of the bounce must diminish after each hit") — previously only
-    // vy lost energy per bounce, so the shot kept moving forward at exactly
-    // the same speed for its whole flight regardless of how many times it
-    // had already bounced, which read as unnatural. Milder than the
-    // vertical loss (0.85 vs 0.6) since a real skip loses most of its
-    // energy into the bounce itself, not the forward glide.
-    public static final double BOUNCING_HORIZONTAL_RETENTION = 0.85;
+    // speed of the bounce must diminish after each hit"; 0.85 "still going
+    // too quickly" on playtest — dropped to match the vertical loss (0.6)
+    // for a much steeper, clearly-noticeable slowdown: ~22% of original
+    // speed left after 3 bounces, ~8% after 5, vs. 0.85's much gentler
+    // ~61%/~44%).
+    public static final double BOUNCING_HORIZONTAL_RETENTION = 0.6;
     // Clamps the reflected |vy| after each bounce. Without this, a steep
     // first-contact angle at high power (vy0 ~= power*POWER_SCALE) reflects
     // most of its speed straight up, and worst-case hangtime across 3

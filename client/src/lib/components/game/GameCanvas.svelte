@@ -10,9 +10,11 @@
 	import { aimStore, type AimState } from '../../stores/aimStore';
 	import { drawTerrain } from '../../game/render/terrainRenderer';
 	import { drawTanks } from '../../game/render/tankRenderer';
+	import { drawShields } from '../../game/render/shieldRenderer';
 	import {
 		drawProjectile,
 		isAnimationFinished,
+		getImpactPhaseStartMs,
 		PROJECTILE_ANIMATION_DURATION_MS
 	} from '../../game/render/projectileRenderer';
 	import { playImpacts, playRicochet } from '../../audio/soundManager';
@@ -103,17 +105,21 @@
 
 			drawTerrain(ctx, heightsToDraw, viewport);
 			drawTanks(ctx, playersToDraw, viewport, aimAngleByPlayerId);
+			drawShields(ctx, playersToDraw, viewport, performance.now());
 
 			if (activeShot) {
 				drawProjectile(ctx, activeShot.trajectory, activeShot.impacts, activeShot.weaponId, elapsed, viewport);
 
-				// Sound, once per shot, right as the flight animation ends and
-				// the impact effects start (matches drawProjectile's own
-				// flashElapsed=0 moment). Bouncing Betty keeps its own staggered
+				// Sound, once per shot, right as the impact effects actually start
+				// (matches drawProjectile's own flashElapsed=0 moment — for MIRV
+				// with multiple children that's after the fall phase, not right
+				// at the flight animation's end, so it doesn't play before the
+				// children visually land). Bouncing Betty keeps its own staggered
 				// ricochet-per-bounce sequence (from the pilot); every other
 				// weapon's impact sequencing (staggered bomblets, scrape-then-
 				// boom, etc.) is handled inside soundManager.playImpacts itself.
-				if (elapsed >= PROJECTILE_ANIMATION_DURATION_MS && soundedShot !== activeShot) {
+				const impactPhaseStart = getImpactPhaseStartMs(activeShot.weaponId, activeShot.impacts.length);
+				if (elapsed >= impactPhaseStart && soundedShot !== activeShot) {
 					soundedShot = activeShot;
 					if (activeShot.weaponId === 'bouncing_betty') {
 						const bounceCount = Math.max(0, activeShot.impacts.length - 1);
@@ -126,7 +132,7 @@
 					}
 				}
 
-				if (isAnimationFinished(elapsed, activeShot.weaponId)) {
+				if (isAnimationFinished(elapsed, activeShot.weaponId, activeShot.impacts.length)) {
 					clearShotAnimation();
 				}
 			}

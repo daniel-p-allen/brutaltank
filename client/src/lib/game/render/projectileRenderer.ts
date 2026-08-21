@@ -28,6 +28,22 @@ const NUKE_FLASH_DURATION_MS = 700;
 /** Nuke's smoke puffs outlive the fireball flash; the whole post-impact effect must stay mounted this long. */
 const NUKE_EFFECT_DURATION_MS = 1500;
 const NUKE_SMOKE_PUFF_COUNT = 7;
+/** MIRV: how long children take to fall from the split point to their individual landing spots, after the shared climb-to-apex phase ends. */
+const MIRV_FALL_DURATION_MS = 500;
+
+/** When the impact/flash phase begins for a given shot — normally right after the flight animation, but MIRV with multiple children gets an extra fall phase first so they're visibly seen landing separately, not just flashing at once. */
+export function getImpactPhaseStartMs(weaponId: string, impactCount: number): number {
+	if (weaponId === 'mirv' && impactCount > 1) {
+		return PROJECTILE_ANIMATION_DURATION_MS + MIRV_FALL_DURATION_MS;
+	}
+	return PROJECTILE_ANIMATION_DURATION_MS;
+}
+
+/** Napalm's initial splash burst — wider than the generic flash, per PLAN.md 7.1 ("orange->dark red gradient, wider/longer-lived"). */
+const NAPALM_FLASH_DURATION_MS = 900;
+/** Flickering flame licks persist after the splash fades, so it reads as burning ground, not one blast. */
+const NAPALM_EFFECT_DURATION_MS = 1400;
+const NAPALM_FLAME_COUNT = 6;
 
 /** Returns a point along the (already resampled) trajectory for a given 0..1 progress. */
 export function pointAtProgress(trajectory: Point[], progress: number): Point | null {
@@ -112,6 +128,45 @@ function drawNukeEffect(ctx: CanvasRenderingContext2D, x: number, y: number, fla
 	}
 }
 
+/** Napalm: a wide orange-to-dark-red splash burst, then flickering flame licks that persist and sway rather than smoothly fading — reads as burning ground, not a single blast. */
+function drawNapalmEffect(ctx: CanvasRenderingContext2D, x: number, y: number, flashElapsedMs: number, seed: number): void {
+	const overallFade = 1 - Math.max(0, (flashElapsedMs - NAPALM_EFFECT_DURATION_MS * 0.7) / (NAPALM_EFFECT_DURATION_MS * 0.3));
+
+	if (flashElapsedMs <= NAPALM_FLASH_DURATION_MS) {
+		const flashProgress = flashElapsedMs / NAPALM_FLASH_DURATION_MS;
+		const radius = 12 + flashProgress * 50;
+		const alpha = 1 - flashProgress * 0.7;
+		const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+		gradient.addColorStop(0, `rgba(255, 200, 90, ${alpha})`);
+		gradient.addColorStop(0.4, `rgba(240, 110, 30, ${alpha * 0.9})`);
+		gradient.addColorStop(0.75, `rgba(150, 30, 15, ${alpha * 0.7})`);
+		gradient.addColorStop(1, `rgba(80, 10, 10, 0)`);
+		ctx.beginPath();
+		ctx.fillStyle = gradient;
+		ctx.arc(x, y, radius, 0, Math.PI * 2);
+		ctx.fill();
+	}
+
+	for (let i = 0; i < NAPALM_FLAME_COUNT; i++) {
+		const flameSeed = seed + i * 577;
+		const offsetX = (seededRandom(flameSeed) - 0.5) * 60;
+		const flicker = 0.6 + 0.4 * Math.sin(flashElapsedMs / (70 + seededRandom(flameSeed + 1) * 40) + flameSeed);
+		const sway = Math.sin(flashElapsedMs / 220 + flameSeed) * 4;
+		const height = 14 + 10 * flicker;
+		const flameX = x + offsetX + sway;
+		const flameY = y - height * 0.4;
+		const alpha = overallFade * (0.35 + 0.35 * flicker);
+		const gradient = ctx.createRadialGradient(flameX, flameY, 0, flameX, flameY, height);
+		gradient.addColorStop(0, `rgba(255, 220, 120, ${alpha})`);
+		gradient.addColorStop(0.5, `rgba(240, 100, 30, ${alpha * 0.8})`);
+		gradient.addColorStop(1, `rgba(120, 20, 10, 0)`);
+		ctx.beginPath();
+		ctx.fillStyle = gradient;
+		ctx.ellipse(flameX, flameY, height * 0.4, height, 0, 0, Math.PI * 2);
+		ctx.fill();
+	}
+}
+
 export function drawProjectile(
 	ctx: CanvasRenderingContext2D,
 	trajectory: Point[],
@@ -132,10 +187,43 @@ export function drawProjectile(
 		return;
 	}
 
+	const impactPhaseStart = getImpactPhaseStartMs(weaponId, impacts.length);
+
+	// MIRV fall phase: the shared trajectory only covers the climb to the
+	// split point (children's individual flight paths were deliberately
+	// dropped from ShotResolved.trajectory in an earlier rewind-glitch fix,
+	// leaving nothing to visually connect the split to each child's landing
+	// spot — per user feedback, "not seeing the falling part of the
+	// children"). Each child gets its own dot falling from the split point
+	// (the trajectory's last point) to its own impact, with a slight
+	// downward-arcing ease rather than a flat linear slide.
+	if (weaponId === 'mirv' && impacts.length > 1 && elapsedMs <= impactPhaseStart) {
+		const splitPoint = trajectory[trajectory.length - 1];
+		if (!splitPoint) return;
+		const fallProgress = (elapsedMs - PROJECTILE_ANIMATION_DURATION_MS) / MIRV_FALL_DURATION_MS;
+		const eased = fallProgress * fallProgress; // ease-in, reads as gravity taking over post-split
+		const { x: sx, y: sy } = worldToCanvas(splitPoint.x, splitPoint.y, viewport);
+		for (const impact of impacts) {
+			const { x: ix, y: iy } = worldToCanvas(impact.x, impact.y, viewport);
+			const x = sx + (ix - sx) * eased;
+			const y = sy + (iy - sy) * eased;
+			ctx.beginPath();
+			ctx.fillStyle = '#222';
+			ctx.arc(x, y, 3, 0, Math.PI * 2);
+			ctx.fill();
+		}
+		return;
+	}
+
 	// Post-flight impact effect(s), one per real detonation point.
-	const flashElapsed = elapsedMs - PROJECTILE_ANIMATION_DURATION_MS;
+	const flashElapsed = elapsedMs - impactPhaseStart;
 	const isNuke = weaponId === 'nuke';
-	const effectDuration = isNuke ? NUKE_EFFECT_DURATION_MS : IMPACT_FLASH_DURATION_MS;
+	const isNapalm = weaponId === 'napalm';
+	const effectDuration = isNuke
+		? NUKE_EFFECT_DURATION_MS
+		: isNapalm
+			? NAPALM_EFFECT_DURATION_MS
+			: IMPACT_FLASH_DURATION_MS;
 	if (flashElapsed > effectDuration) return;
 
 	// Bouncing Betty: every impact point except the last is a bounce that
@@ -154,6 +242,8 @@ export function drawProjectile(
 			// but handled generically since `impacts` is always a list)
 			// don't look identical.
 			drawNukeEffect(ctx, x, y, flashElapsed, point.x * 1000 + point.y * 37);
+		} else if (isNapalm) {
+			drawNapalmEffect(ctx, x, y, flashElapsed, point.x * 1000 + point.y * 37);
 		} else if (isBouncingBetty && index < impacts.length - 1) {
 			const sparkProgress = flashElapsed / BOUNCE_SPARK_DURATION_MS;
 			if (sparkProgress <= 1) {
@@ -168,7 +258,13 @@ export function drawProjectile(
 	});
 }
 
-export function isAnimationFinished(elapsedMs: number, weaponId?: string): boolean {
-	const effectDuration = weaponId === 'nuke' ? NUKE_EFFECT_DURATION_MS : IMPACT_FLASH_DURATION_MS;
-	return elapsedMs > PROJECTILE_ANIMATION_DURATION_MS + effectDuration;
+export function isAnimationFinished(elapsedMs: number, weaponId?: string, impactCount = 1): boolean {
+	const effectDuration =
+		weaponId === 'nuke'
+			? NUKE_EFFECT_DURATION_MS
+			: weaponId === 'napalm'
+				? NAPALM_EFFECT_DURATION_MS
+				: IMPACT_FLASH_DURATION_MS;
+	const impactPhaseStart = getImpactPhaseStartMs(weaponId ?? '', impactCount);
+	return elapsedMs > impactPhaseStart + effectDuration;
 }

@@ -245,6 +245,13 @@ export interface TurnStartedPayload {
 	turnTimeoutSec: number;
 }
 
+export interface TurnForfeitedPayload {
+	playerId: string;
+	penalty: number;
+	newCash: number;
+	eliminated: boolean;
+}
+
 /** One of a small fixed set of reason codes, e.g. NOT_YOUR_TURN, INVALID_WEAPON, MATCH_NOT_IN_PROGRESS, RATE_LIMITED. */
 export interface FireRejectedPayload {
 	reason: string;

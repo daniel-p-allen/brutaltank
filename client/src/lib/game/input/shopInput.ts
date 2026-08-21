@@ -14,3 +14,9 @@ export function sendShopPurchase(itemId: string, itemType: 'WEAPON' | 'SHIELD', 
 	wsClient.sendJson(envelope);
 	return requestId;
 }
+
+/** Signals this player is done shopping — see protocol.md's ShopContinue. No payload, no direct reply; the round transition is the observable effect. */
+export function sendShopContinue(): void {
+	const envelope = buildEnvelope('ShopContinue', {});
+	wsClient.sendJson(envelope);
+}

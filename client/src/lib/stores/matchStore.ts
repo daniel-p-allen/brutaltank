@@ -48,6 +48,7 @@ import type {
 	ShopUpdatePayload,
 	ShotResolvedPayload,
 	Terrain,
+	TurnForfeitedPayload,
 	TurnStartedPayload,
 	Wind
 } from '../protocol/types';
@@ -255,6 +256,22 @@ export function applyPlayerAiming(state: MatchState, payload: PlayerAimingPayloa
 	return { ...state, remoteAim: { ...state.remoteAim, [payload.playerId]: payload.angleDeg } };
 }
 
+/** Pure helper (exported for unit testing): applies a missed-turn cash penalty, and bankruptcy elimination if it brought cash to 0. */
+export function applyTurnForfeited(state: MatchState, payload: TurnForfeitedPayload): MatchState {
+	return {
+		...state,
+		players: state.players.map((p) =>
+			p.playerId === payload.playerId
+				? {
+						...p,
+						cash: payload.newCash,
+						tank: payload.eliminated ? { ...p.tank, alive: false } : p.tank
+					}
+				: p
+		)
+	};
+}
+
 /** Pure helper (exported for unit testing). */
 export function applyPlayerDisconnected(state: MatchState, playerId: string): MatchState {
 	if (state.disconnectedPlayerIds.includes(playerId)) return state;
@@ -340,6 +357,10 @@ function createMatchStore() {
 
 			case 'PlayerAiming':
 				update((state) => applyPlayerAiming(state, envelope.payload as PlayerAimingPayload));
+				return;
+
+			case 'TurnForfeited':
+				update((state) => applyTurnForfeited(state, envelope.payload as TurnForfeitedPayload));
 				return;
 
 			case 'PlayerDisconnected':

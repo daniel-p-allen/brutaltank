@@ -488,6 +488,24 @@ public final class Payloads {
         }
     }
 
+    /** Server -> Client: {@code TurnForfeited{playerId, penalty, newCash, eliminated}} — broadcast when a turn times out without a Fire (per user feedback: "if you miss your turn without taking a shot, you lost 50"). */
+    public static final class TurnForfeited {
+        public String playerId;
+        public int penalty;
+        public int newCash;
+        public boolean eliminated;
+
+        public TurnForfeited() {
+        }
+
+        public TurnForfeited(String playerId, int penalty, int newCash, boolean eliminated) {
+            this.playerId = playerId;
+            this.penalty = penalty;
+            this.newCash = newCash;
+            this.eliminated = eliminated;
+        }
+    }
+
     // ---------------------------------------------------------------
     // M2: match/turn messages (shared/protocol.md section 4)
     // ---------------------------------------------------------------
