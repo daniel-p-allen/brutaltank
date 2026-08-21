@@ -13,18 +13,22 @@ import java.util.List;
  *   <li>{@link WeaponDef.Behavior#TUNNELING}: doesn't terminate on the first
  *       terrain hit — keeps integrating "underground" until cumulative
  *       penetration depth exceeds {@link #TUNNELING_MAX_PENETRATION}.</li>
- *   <li>{@link WeaponDef.Behavior#BOUNCING}: reflects {@code vy} (×0.6) on
- *       every terrain hit — no angle gate, it always bounces off the
- *       ground. The bounce budget (3-5, see {@link #computeMaxBounces})
- *       is fixed once at the very first ground contact from that contact's
- *       incidence angle: flatter first hits get more bounces, steeper ones
- *       get fewer. Only the terrain check has this behavior; a direct
- *       mid-air tank hit (within {@link #TANK_HITBOX_RADIUS}, checked every
- *       step before the terrain check) still terminates immediately with a
- *       full detonation and no bounce, same as every other weapon. The
- *       reflected {@code vy} is clamped to {@link #MAX_BOUNCE_VY} so a
- *       steep, high-power shot's hangtime can't approach {@link
- *       #MAX_STEPS}.</li>
+ *   <li>{@link WeaponDef.Behavior#BOUNCING}: reflects {@code vy} (×{@link
+ *       #BOUNCING_ENERGY_RETENTION}) and decays {@code vx} (×{@link
+ *       #BOUNCING_HORIZONTAL_RETENTION}) on every terrain hit — no angle
+ *       gate, it always bounces off the ground, and visibly slows down
+ *       (not just loses height) over its bounce sequence. The bounce
+ *       budget (3-5, see {@link #computeMaxBounces}) is fixed once at the
+ *       very first ground contact from that contact's incidence angle:
+ *       flatter first hits get more bounces, steeper ones get fewer. Only
+ *       the terrain check has this behavior; a direct mid-air tank hit
+ *       (within {@link #TANK_HITBOX_RADIUS}, checked every step before the
+ *       terrain check) still terminates immediately with a full detonation
+ *       and no bounce, same as every other weapon — a close in-flight pass
+ *       can cut the bounce sequence short this way, by design (confirmed
+ *       with the user, not a bug). The reflected {@code vy} is clamped to
+ *       {@link #MAX_BOUNCE_VY} so a steep, high-power shot's hangtime can't
+ *       approach {@link #MAX_STEPS}.</li>
  *   <li>Apex detection ({@code stopAtApex}): used by MIRV — {@code Match}
  *       calls {@link #simulate} once with {@code stopAtApex=true} to find the
  *       split point, then simulates each child from there. Apex is the step
@@ -72,6 +76,14 @@ public final class ProjectileSim {
     public static final double BOUNCING_FLAT_TIER_DEG = 25.0;
     public static final double BOUNCING_STEEP_TIER_DEG = 60.0;
     public static final double BOUNCING_ENERGY_RETENTION = 0.6;
+    // Horizontal speed also bleeds off each bounce (per user feedback: "the
+    // speed of the bounce must diminish after each hit") — previously only
+    // vy lost energy per bounce, so the shot kept moving forward at exactly
+    // the same speed for its whole flight regardless of how many times it
+    // had already bounced, which read as unnatural. Milder than the
+    // vertical loss (0.85 vs 0.6) since a real skip loses most of its
+    // energy into the bounce itself, not the forward glide.
+    public static final double BOUNCING_HORIZONTAL_RETENTION = 0.85;
     // Clamps the reflected |vy| after each bounce. Without this, a steep
     // first-contact angle at high power (vy0 ~= power*POWER_SCALE) reflects
     // most of its speed straight up, and worst-case hangtime across 3
@@ -335,6 +347,10 @@ public final class ProjectileSim {
                         // can't rack up hangtime anywhere near MAX_STEPS —
                         // see MAX_BOUNCE_VY's javadoc.
                         vy = Math.max(-MAX_BOUNCE_VY, vy);
+                        // Horizontal speed also decays each bounce, so the
+                        // whole shot visibly slows down over its sequence,
+                        // not just loses bounce height.
+                        vx *= BOUNCING_HORIZONTAL_RETENTION;
                         y = groundY - 1; // nudge back above ground to avoid immediate re-trigger
                         continue;
                     }

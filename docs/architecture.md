@@ -211,7 +211,7 @@ Actual art asset creation (drawing sprite sheets) is a separate content task out
 | MIRV | Splits into 3-5 children at apex (±15° spread) | 25/child | 15/child | 300 | 2 |
 | Napalm | Elevated splash radius/damage (simplified — true DOT deferred to v2) | 50 | 20 | 250 | 2 |
 | Tunneling Shot | Continues through terrain up to 40-unit penetration, carves a tunnel | 25 | 30 | 200 | 2 |
-| Bouncing Betty | Always reflects off terrain (no angle gate), 3-5 bounces by first-hit angle, ×0.6 speed loss each, flat 25% damage per connecting bounce | 30 | 25 | 220 | 2 |
+| Bouncing Betty | Always reflects off terrain (no angle gate), 3-5 bounces by first-hit angle, ×0.6 vertical / ×0.85 horizontal speed loss each, flat 25% damage per connecting bounce | 30 | 25 | 220 | 2 |
 | Cluster Bomb | Primary detonation + 4 sideways bomblets | 20/12 | 20 | 280 | 2 |
 | Digger | Small blast, ×1.8 crater depth — terrain-shaping tool | 20 | 10 | 120 | 3 |
 | Nuke | Standard arc, massive radius/damage, rare | 90 | 70 | 600 | 1 |

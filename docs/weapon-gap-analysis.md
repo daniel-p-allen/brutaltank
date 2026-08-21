@@ -142,14 +142,26 @@ file is the source of record).
   propellant charge launches the body ~1m straight up, then a second
   ~0.5s-delay fuze detonates it mid-air, scattering shrapnel 360°. It
   launches itself once — it never skips along the ground.
-- **We have (as of the pilot redesign)**: reflects off *every* terrain hit at
-  ×0.6 velocity — no angle gate — for a budget of 3-5 bounces fixed at the
-  first ground contact (flatter first hit = more bounces, steeper = fewer),
-  leaving skip-mark divots at each bounce, before a final full detonation.
-  This replaces the original `<35°`-incidence-gated version, which turned
-  out to be almost unreachable under normal arcing play (a symmetric 45°
-  shot lands at ~45° incidence, never qualifying) — the user had never
-  actually seen a bounce happen because of it. Each bounce deals flat,
+- **We have (as of the pilot redesign)**: reflects off *every* terrain hit —
+  no angle gate — for a budget of 3-5 bounces fixed at the first ground
+  contact (flatter first hit = more bounces, steeper = fewer), leaving
+  skip-mark divots at each bounce, before a final full detonation. This
+  replaces the original `<35°`-incidence-gated version, which turned out to
+  be almost unreachable under normal arcing play (a symmetric 45° shot
+  lands at ~45° incidence, never qualifying) — the user had never actually
+  seen a bounce happen because of it. Both velocity components now decay
+  per bounce (per user feedback: "the speed of the bounce must diminish
+  after each hit" — vertical loss alone wasn't enough, the shot kept
+  moving forward at identical speed for its whole flight regardless of
+  bounce count): `vy` ×0.6 (`BOUNCING_ENERGY_RETENTION`), `vx` ×0.85
+  (`BOUNCING_HORIZONTAL_RETENTION`, milder since a real skip loses most of
+  its energy into the bounce itself, not the forward glide). Also
+  confirmed: a close in-flight pass near a tank (within
+  `ProjectileSim.TANK_HITBOX_RADIUS`, 14 units) still short-circuits the
+  whole bounce sequence into an immediate full-damage direct hit, same as
+  every other weapon — this is by design, not a bug, even though the
+  always-bounce redesign makes it easier to trigger mid-sequence than it
+  used to be. Each bounce deals flat,
   direct-hit-only damage (`Match.BOUNCE_DAMAGE_FRACTION = 0.25`, 25% of
   `centerDamage`, no blast falloff) to any tank within `BOUNCE_DAMAGE_RADIUS`
   (30 units); **confirmed final by the user** — the earlier open question
