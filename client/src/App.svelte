@@ -13,8 +13,16 @@
 	import { connectionStore } from './lib/stores/connectionStore';
 	import { matchStore } from './lib/stores/matchStore';
 	import { lobbyStore } from './lib/stores/lobbyStore';
+	import { sessionStore } from './lib/stores/sessionStore';
 
 	type Screen = 'menu' | 'lobby' | 'match' | 'post-match';
+
+	// Titles the page in the local player's own tank color once they're in a
+	// match, so it doubles as a "this one's you" indicator — falls back to
+	// the default heading color (unset, inherits from CSS) before joining,
+	// since there's no player color to show yet.
+	$: localPlayerColor =
+		$matchStore.players.find((p) => p.playerId === $sessionStore.playerId)?.color ?? null;
 
 	// The server never actually sends a MatchStateSync (the only message that
 	// sets matchStore.status) while a match is WAITING — that status only
@@ -36,7 +44,7 @@
 </script>
 
 <main>
-	<h1>BrutalTank</h1>
+	<h1 style={localPlayerColor ? `color: ${localPlayerColor}` : ''}>BrutalTank</h1>
 	<ConnectionStatus />
 
 	{#if $connectionStore.status === 'open'}
