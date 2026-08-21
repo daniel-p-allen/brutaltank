@@ -15,6 +15,7 @@
 		isAnimationFinished,
 		PROJECTILE_ANIMATION_DURATION_MS
 	} from '../../game/render/projectileRenderer';
+	import { play as playSound } from '../../audio/soundManager';
 	import WindIndicator from './WindIndicator.svelte';
 	import type { MatchState } from '../../stores/matchStore';
 	import type { PendingShotAnimation } from '../../stores/shotAnimationStore';
@@ -53,6 +54,12 @@
 	let activeShot: PendingShotAnimation | null = null;
 	let localPlayerId: string | null = null;
 	let aim: AimState = { angleDeg: 45, power: 60 };
+
+	// Tracks which shot's sound sequence has already been triggered, so it
+	// fires exactly once per shot rather than every frame the flight-end
+	// condition below is true. Bouncing Betty only, for this pilot — see
+	// soundManager.ts.
+	let soundedShot: PendingShotAnimation | null = null;
 
 	const unsubMatch = matchStore.subscribe((s) => (scene = s));
 	const unsubShot = pendingShotAnimation.subscribe((s) => (activeShot = s));
@@ -99,6 +106,25 @@
 
 			if (activeShot) {
 				drawProjectile(ctx, activeShot.trajectory, activeShot.impacts, activeShot.weaponId, elapsed, viewport);
+
+				// Sound, once per shot, right as the flight animation ends and
+				// the impact effects start (matches drawProjectile's own
+				// flashElapsed=0 moment). Bouncing Betty only for this pilot —
+				// a short staggered ricochet-per-bounce sequence ending in the
+				// real detonation thump, rather than everything firing at once.
+				if (
+					activeShot.weaponId === 'bouncing_betty' &&
+					elapsed >= PROJECTILE_ANIMATION_DURATION_MS &&
+					soundedShot !== activeShot
+				) {
+					soundedShot = activeShot;
+					const bounceCount = Math.max(0, activeShot.impacts.length - 1);
+					for (let i = 0; i < bounceCount; i++) {
+						setTimeout(() => playSound('ricochet'), i * 90);
+					}
+					setTimeout(() => playSound('impact_light'), bounceCount * 90);
+				}
+
 				if (isAnimationFinished(elapsed, activeShot.weaponId)) {
 					clearShotAnimation();
 				}

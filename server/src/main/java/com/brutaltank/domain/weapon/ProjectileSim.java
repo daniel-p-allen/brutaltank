@@ -13,10 +13,18 @@ import java.util.List;
  *   <li>{@link WeaponDef.Behavior#TUNNELING}: doesn't terminate on the first
  *       terrain hit — keeps integrating "underground" until cumulative
  *       penetration depth exceeds {@link #TUNNELING_MAX_PENETRATION}.</li>
- *   <li>{@link WeaponDef.Behavior#BOUNCING}: reflects {@code vy} (×0.6) on a
- *       shallow-angle terrain hit (&lt;35&deg; from horizontal), up to
- *       {@link #BOUNCING_MAX_BOUNCES} times, then detonates on the next
- *       hit.</li>
+ *   <li>{@link WeaponDef.Behavior#BOUNCING}: reflects {@code vy} (×0.6) on
+ *       every terrain hit — no angle gate, it always bounces off the
+ *       ground. The bounce budget (3-5, see {@link #computeMaxBounces})
+ *       is fixed once at the very first ground contact from that contact's
+ *       incidence angle: flatter first hits get more bounces, steeper ones
+ *       get fewer. Only the terrain check has this behavior; a direct
+ *       mid-air tank hit (within {@link #TANK_HITBOX_RADIUS}, checked every
+ *       step before the terrain check) still terminates immediately with a
+ *       full detonation and no bounce, same as every other weapon. The
+ *       reflected {@code vy} is clamped to {@link #MAX_BOUNCE_VY} so a
+ *       steep, high-power shot's hangtime can't approach {@link
+ *       #MAX_STEPS}.</li>
  *   <li>Apex detection ({@code stopAtApex}): used by MIRV — {@code Match}
  *       calls {@link #simulate} once with {@code stopAtApex=true} to find the
  *       split point, then simulates each child from there. Apex is the step
@@ -52,9 +60,26 @@ public final class ProjectileSim {
     // see no tunnel... what I see is nothing"). 160 gives real elongated
     // travel underground before the final explosion.
     public static final double TUNNELING_MAX_PENETRATION = 160.0;
-    public static final int BOUNCING_MAX_BOUNCES = 3;
+    // Bounce budget ceiling/floor and the angle tiers that pick between them
+    // (per user feedback: "it will always bounce... between 3 and 5 bounces
+    // depending on angle" — replaces the old <35deg shallow-angle gate,
+    // which made bounces almost unreachable under normal arcing play: a
+    // symmetric 45deg shot lands at ~45deg incidence, never qualifying).
+    // First-pass thresholds, same "tune after playtest" spirit as
+    // BOUNCE_DAMAGE_FRACTION in Match.java.
+    public static final int BOUNCING_MAX_BOUNCES = 5;
+    public static final int BOUNCING_MIN_BOUNCES = 3;
+    public static final double BOUNCING_FLAT_TIER_DEG = 25.0;
+    public static final double BOUNCING_STEEP_TIER_DEG = 60.0;
     public static final double BOUNCING_ENERGY_RETENTION = 0.6;
-    public static final double BOUNCING_SHALLOW_ANGLE_DEG = 35.0;
+    // Clamps the reflected |vy| after each bounce. Without this, a steep
+    // first-contact angle at high power (vy0 ~= power*POWER_SCALE) reflects
+    // most of its speed straight up, and worst-case hangtime across 3
+    // steep-tier bounces can approach/exceed MAX_STEPS — previously
+    // impossible, since steep shots never bounced at all under the old
+    // gate. 400 keeps worst-case total hangtime for 3 bounces well under
+    // the 20s cap (400 + 240 + 144 -> summed hangtime ~7s).
+    public static final double MAX_BOUNCE_VY = 400.0;
 
     private static final int MAX_STEPS = 20 * 60; // 20s safety cap
 
@@ -190,6 +215,7 @@ public final class ProjectileSim {
         double penetrationEntryX = Double.NaN;
         double penetrationEntryY = 0;
         int bounceCount = 0;
+        int maxBounces = -1; // fixed at first ground contact, then constant for this shot
         List<double[]> bouncePoints = new ArrayList<>();
         List<double[]> undergroundPath = new ArrayList<>();
 
@@ -291,12 +317,24 @@ public final class ProjectileSim {
                     undergroundPath.add(new double[] {x, y});
                     continue;
                 }
-                if (bouncing && bounceCount < BOUNCING_MAX_BOUNCES) {
-                    double incidenceDeg = Math.toDegrees(Math.atan2(Math.abs(vy), Math.abs(vx) + 1e-9));
-                    if (incidenceDeg < BOUNCING_SHALLOW_ANGLE_DEG) {
+                if (bouncing) {
+                    if (maxBounces < 0) {
+                        // First ground contact fixes this shot's bounce
+                        // budget for good — flatter first hits get more
+                        // bounces, steeper ones get fewer. No angle gate:
+                        // every ground contact bounces until the budget is
+                        // spent.
+                        double incidenceDeg = Math.toDegrees(Math.atan2(Math.abs(vy), Math.abs(vx) + 1e-9));
+                        maxBounces = computeMaxBounces(incidenceDeg);
+                    }
+                    if (bounceCount < maxBounces) {
                         bounceCount++;
                         bouncePoints.add(new double[] {x, groundY});
                         vy = -vy * BOUNCING_ENERGY_RETENTION;
+                        // Clamp reflected speed so a steep, high-power bounce
+                        // can't rack up hangtime anywhere near MAX_STEPS —
+                        // see MAX_BOUNCE_VY's javadoc.
+                        vy = Math.max(-MAX_BOUNCE_VY, vy);
                         y = groundY - 1; // nudge back above ground to avoid immediate re-trigger
                         continue;
                     }
@@ -310,6 +348,22 @@ public final class ProjectileSim {
         List<double[]> resampled = resample(path, RESAMPLE_POINTS);
         return new Result(path, resampled, last[0], last[1], hitPlayerId, apexHit, vx, vy, bounceCount,
                 penetrationEntryX, penetrationEntryY, bouncePoints, undergroundPath);
+    }
+
+    /**
+     * Bounce budget for a BOUNCING shot, fixed from its first ground
+     * contact's incidence angle. Flatter (more horizontal) first hits get
+     * more bounces; steeper (more vertical) hits get fewer. First-pass
+     * thresholds — see BOUNCING_FLAT_TIER_DEG/BOUNCING_STEEP_TIER_DEG.
+     */
+    private static int computeMaxBounces(double incidenceDeg) {
+        if (incidenceDeg <= BOUNCING_FLAT_TIER_DEG) {
+            return BOUNCING_MAX_BOUNCES; // 5
+        }
+        if (incidenceDeg <= BOUNCING_STEEP_TIER_DEG) {
+            return 4;
+        }
+        return BOUNCING_MIN_BOUNCES; // 3
     }
 
     private static List<double[]> resample(List<double[]> path, int targetCount) {

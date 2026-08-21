@@ -122,15 +122,17 @@ class ProjectileSimTest {
     }
 
     @Test
-    void bouncingReflectsOffShallowAngleTerrainHit() {
+    void bouncingFlatTierReachesFiveBounces() {
+        // Redesigned mechanic (per user feedback: "it will always bounce...
+        // between 3 and 5 bounces depending on angle"): a flat/skimming
+        // first ground contact (<=25deg incidence) gets the 5-bounce
+        // ceiling. A 15deg launch, close to the ground, lands at ~18deg
+        // incidence -- flat tier.
         Terrain terrain = flatTerrain(500);
-        // Shallow, low-angle, fast shot: should skip off the ground at least once
-        // instead of stopping at the first terrain hit.
         ProjectileSim.Result result = ProjectileSim.simulate(50, 450, 15, 70, 0, terrain,
                 Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
 
-        assertTrue(result.bounceCount >= 1, "expected at least one bounce, got " + result.bounceCount);
-        assertTrue(result.bounceCount <= ProjectileSim.BOUNCING_MAX_BOUNCES);
+        assertEquals(5, result.bounceCount, "flat first contact should reach the 5-bounce ceiling");
 
         // A bouncing shot should travel farther than an equivalent standard shot
         // fired at the same shallow angle, since it skips instead of stopping.
@@ -139,6 +141,36 @@ class ProjectileSimTest {
                 Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
         assertTrue(result.impactX > standard.impactX,
                 "bouncing shot should travel farther: bounced=" + result.impactX + " standard=" + standard.impactX);
+    }
+
+    @Test
+    void bouncingModerateTierReachesFourBounces() {
+        // A moderate arc (45deg launch, 100 units above ground) lands at
+        // ~47deg incidence -- the middle tier (25 < incidence <= 60 -> 4).
+        Terrain terrain = flatTerrain(500);
+        ProjectileSim.Result result = ProjectileSim.simulate(200, 400, 45, 60, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
+
+        assertEquals(4, result.bounceCount, "moderate first contact should reach the 4-bounce middle tier");
+    }
+
+    @Test
+    void bouncingSteepTierAlwaysBouncesAtLeastThreeTimesAndTerminatesPromptly() {
+        // Core of the redesign: even a steep, near-vertical, max-power shot
+        // (previously unreachable under the old <35deg gate, since it would
+        // never have bounced at all) must still bounce (the 3-bounce floor)
+        // and must terminate well within the simulation's step cap -- this
+        // is the direct regression test for the MAX_BOUNCE_VY clamp, which
+        // exists specifically to keep a steep bounce's hangtime bounded.
+        Terrain terrain = flatTerrain(500);
+        ProjectileSim.Result result = ProjectileSim.simulate(200, 400, 85, 100, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
+
+        assertEquals(3, result.bounceCount, "steep first contact should bounce exactly the 3-bounce floor");
+        assertTrue(result.impactY >= 499 && result.impactY <= 510,
+                "expected the shot to settle at ground level, got impactY=" + result.impactY);
+        assertTrue(result.rawPath.size() < 1200,
+                "expected the shot to terminate well within the MAX_STEPS cap, used " + result.rawPath.size() + " steps");
     }
 
     @Test

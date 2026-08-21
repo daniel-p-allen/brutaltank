@@ -475,17 +475,24 @@ class WeaponAndShieldTest {
         // it, ahead of it, behind it, on a ring around it -- was ALSO within
         // ProjectileSim.TANK_HITBOX_RADIUS (14) of some other point on the
         // same shot's raw path. That's inherent to the bounce mechanic
-        // itself: reflection only triggers below a shallow 35deg incidence
-        // angle, so every bounce's approach and departure hug the ground
+        // itself: every bounce's approach and departure hug the ground
         // tightly and close together (successive bounces land ~15-50 units
         // apart), leaving no gap wide enough for BOUNCE_DAMAGE_RADIUS (30)
         // and TANK_HITBOX_RADIUS (14) to both be satisfied at once. So a
         // trajectory-driven test of this exact "graze a nearby tank, not a
         // direct hit" scenario isn't constructible from real shots; the
         // bounce-point generation itself is already covered by
-        // ProjectileSimTest.bouncingReflectsOffShallowAngleTerrainHit, so
-        // this test targets the one thing that isn't covered elsewhere: the
-        // damage bookkeeping Match applies once it has bounce points.
+        // ProjectileSimTest (bounce-tier tests), so this test targets the
+        // one thing that isn't covered elsewhere: the damage bookkeeping
+        // Match applies once it has bounce points.
+        //
+        // NOTE: as of the always-bounce redesign, Bouncing Betty bounces on
+        // every ground contact (3-5 times, tiered by the first contact's
+        // angle) rather than only below a 35deg shallow-incidence gate — the
+        // geometric argument above (bounce points always land too close to
+        // a grazed tank for TANK_HITBOX_RADIUS not to fire first) still
+        // holds regardless of that trigger-condition change, which is why
+        // this reflection-based test remains the right approach.
         Match match = newMatch("m-bounce-dmg");
         Joined shooter = join(match, "Shooter");
         Joined target = join(match, "Target");

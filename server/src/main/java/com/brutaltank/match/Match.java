@@ -1053,6 +1053,14 @@ public final class Match {
         // it merges into the same workingHealth/damageByPlayer bookkeeping
         // as the final blast (one consistent DamageEvent per tank, not two
         // conflicting ones).
+        //
+        // connectedBouncePoints tracks which bounce points actually landed a
+        // hit, so they can be folded into allImpacts below — without this,
+        // a bounce that damages a tank produces no client-visible flash at
+        // all (only the health change), since bounce points are otherwise
+        // added to `detonations` with centerDamage=0 (cosmetic skip-mark
+        // only) and excluded from allImpacts on that basis.
+        List<double[]> connectedBouncePoints = new ArrayList<>();
         for (double[] bp : bounceDamagePoints) {
             for (MatchPlayer p : players.values()) {
                 Double hp = workingHealth.get(p.player.playerId);
@@ -1066,6 +1074,7 @@ public final class Match {
                 double newHealth = Math.max(0.0, Math.round(hp - mitigatedDamage));
                 boolean eliminated = newHealth <= 0.0;
                 workingHealth.put(p.player.playerId, newHealth);
+                connectedBouncePoints.add(bp);
 
                 Payloads.DamageEvent existing = damageByPlayer.get(p.player.playerId);
                 double cumulativeDamage = (existing != null ? existing.damage : 0.0) + mitigatedDamage;
@@ -1214,9 +1223,19 @@ public final class Match {
         // explosion at each one — not just the shared `impact` point, which
         // for MIRV/Cluster Bomb is only the split point / primary hit while
         // the children/bomblets actually land (and crater) elsewhere.
-        // Cosmetic zero-damage marks (tunnel bore track, bounce skip marks)
-        // are excluded; those already read as a trail, not explosions.
+        // Cosmetic zero-damage marks (tunnel bore track, bounce skip marks
+        // that missed) are excluded; those already read as a trail, not
+        // explosions. Bounce points that DID connect (in connectedBouncePoints)
+        // are real damage events despite carrying centerDamage=0 in
+        // `detonations` (a bounce is a direct-hit-only graze, not a blast
+        // radius detonation — see the bounce-damage loop above) — added
+        // first so the actual final detonation (always last in `detonations`
+        // for a BOUNCING shot) stays the last entry, which the client relies
+        // on to distinguish "grazed" from "exploded".
         List<Payloads.Impact> allImpacts = new ArrayList<>();
+        for (double[] bp : connectedBouncePoints) {
+            allImpacts.add(new Payloads.Impact(bp[0], bp[1]));
+        }
         for (DetonationSpec d : detonations) {
             if (d.centerDamage() > 0) {
                 allImpacts.add(new Payloads.Impact(d.x(), d.y()));

@@ -211,7 +211,7 @@ Actual art asset creation (drawing sprite sheets) is a separate content task out
 | MIRV | Splits into 3-5 children at apex (±15° spread) | 25/child | 15/child | 300 | 2 |
 | Napalm | Elevated splash radius/damage (simplified — true DOT deferred to v2) | 50 | 20 | 250 | 2 |
 | Tunneling Shot | Continues through terrain up to 40-unit penetration, carves a tunnel | 25 | 30 | 200 | 2 |
-| Bouncing Betty | Reflects on shallow-angle impact (<35°), up to 3 bounces, ×0.6 speed loss each | 30 | 25 | 220 | 2 |
+| Bouncing Betty | Always reflects off terrain (no angle gate), 3-5 bounces by first-hit angle, ×0.6 speed loss each, flat 25% damage per connecting bounce | 30 | 25 | 220 | 2 |
 | Cluster Bomb | Primary detonation + 4 sideways bomblets | 20/12 | 20 | 280 | 2 |
 | Digger | Small blast, ×1.8 crater depth — terrain-shaping tool | 20 | 10 | 120 | 3 |
 | Nuke | Standard arc, massive radius/damage, rare | 90 | 70 | 600 | 1 |
@@ -265,7 +265,6 @@ This ordering front-loads the highest-risk item (server-authoritative shot resol
 - **Dirt-restoration weapons — new mechanic, terrain-building instead of terrain-destroying** (surfaced by genre research, not previously filed). Scorched Earth family: Dirt Clod/Ball/Ton (*"explode into a sphere of dirt when hitting something"*), Liquid Dirt (*"oozes out wherever it lands, filling holes and smoothing the terrain"*), Dirt Charge, Earth Disrupter. All 10 of our current weapons only carve craters (`Terrain.applyCrater`); there is no terrain-raising operation in `Terrain.java` at all. This is a genuinely new terrain mutation, not a stats variant — needs its own `Terrain.applyFill(...)`-shaped method and real scoping on tactical purpose (denying an opponent's low ground? rebuilding your own cover?).
 - **Riot Charge/Blast/Bomb — new weapon family, self-rescue digging** (surfaced by genre research, not previously filed). Scorched Earth precedent: clears a wedge (Riot Charge/Blast, around your own turret) or sphere (Riot Bomb) of dirt, doing *no damage to tanks* — purely for digging yourself out. Directly complements our existing `tankFalls`/terrain-collapse mechanics (`Match.applyDetonations` already drops a tank when its ground gives way) and would pair naturally with the dirt-restoration idea above (something to dig yourself out of, if that ships first).
 - **Leapfrog — new weapon, sequential (not simultaneous) multi-warhead** (surfaced by genre research, not previously filed). Scorched Earth precedent: *"three warheads which launch one after another"* — distinct from our MIRV's simultaneous apex-split. Would conceptually reuse MIRV's child-launch infrastructure but on a delay/re-trigger basis (fire, wait, re-launch from impact point) rather than a single split moment.
-- **Bouncing Betty: deal damage on each bounce, not just a cosmetic skip mark** (user request, filed not implemented — "not sure how to make this work well but research it more"). Currently every bounce is zero-damage/cosmetic (a skip-mark divot only); the final detonation is the only damage event. Needs real design research before implementing: how much damage per bounce vs. the final hit (a fraction of centerDamage? a fixed small amount?), whether bounce damage uses the same blast-radius falloff against nearby tanks or is direct-hit-only, and how repeated partial-damage events read to a player compared to today's single clean hit. Revisit `docs/weapon-gap-analysis.md`'s Bouncing Betty entry (skip-vs-self-launch gap) when scoping this, since it's the same weapon.
 - **Digger: narrow tunnel along its trajectory, ending in a big hole, then the sides collapse** (user request, filed not implemented). Currently Digger is a single-point-impact weapon (`Behavior.DIGGER`, dispatched like `STANDARD` — it detonates on first terrain contact, no penetration phase at all); its only current signature is a narrow-radius/high-depth-multiplier crater. This request asks for something closer to Tunneling Shot's behavior instead: continue along the trajectory underground first (a real tunneling phase, not just a deep single crater), then a bigger detonation at the end. The post-crater slope-settle pass (`Terrain.settleSlopes`, already runs generically after every shot) may already deliver "then collapse" once the hole is big enough to leave a steep edge — worth checking before building anything new there. Needs scoping: how far it tunnels vs. Tunneling Shot's 160-unit penetration, how much bigger "big hole" means numerically, and whether Digger should just become a Tunneling-Shot variant (small radius, shallow penetration, huge final crater) rather than a distinct behavior.
 - **Nuke: a bigger, more dramatic explosion effect — smoke and fire, not just the shared generic flash** (user request, filed not implemented; damage was bumped 70→95 immediately since that part was a simple number). This is the same root gap already noted for the whole roster ("every weapon currently shares one identical generic explosion effect") but called out specifically for Nuke as the highest-priority one to get a distinct look. Needs real client rendering work (a bigger/longer flash, smoke particles, maybe a fire-colored palette) — worth deciding whether to build this Nuke-only first or as part of giving every weapon its own explosion look at once.
 - **Napalm: ground/tank damage over time, pooling in cavities for ongoing damage while it stays on target** (user request, filed not implemented). Idea as discussed: napalm shouldn't be a single instant hit — it should keep dealing damage on subsequent rounds to the ground and any tank it's touching, with some visual sign of it lingering, and specifically *pool* (collect/deepen) in a cavity/dip in the terrain, doing repeated rounds of damage for as long as it stays pooled there. This is a genuinely new category of mechanic, not a stats tweak — nothing in the engine currently persists any state between turns (every shot resolves fully, synchronously, within one `Match.fire()` call); a lingering/ticking effect would need real scoping: where the persistent state lives, how many turns it lasts, how "pooling in a cavity" is detected/represented on a 1D heightmap, and how repeated damage ticks interact with shields/elimination/shop timing. See `docs/weapon-gap-analysis.md`'s Napalm entry for the real-world burn behavior this is modeling.
@@ -305,12 +304,25 @@ This ordering front-loads the highest-risk item (server-authoritative shot resol
 
 Currently every weapon shares one identical generic explosion effect (an
 orange flash, radius 6→26 over 250ms — see `docs/weapon-gap-analysis.md`'s
-baseline gap note) and **there is no audio in the codebase at all** (verified:
-no `Audio`/`.mp3`/`.ogg`/`.wav` reference anywhere under `client/src`). This
-section is the implementation plan for closing both gaps — colors/visuals
-and sound — for the weapon roster (including the new weapons filed above)
-and, secondarily, shields and key UI moments. It is a plan, not yet
-implemented; nothing in this section has shipped.
+baseline gap note) and, until the pilot below, there was no audio in the
+codebase at all. This section is the implementation plan for closing both
+gaps — colors/visuals and sound — for the weapon roster (including the new
+weapons filed above) and, secondarily, shields and key UI moments.
+
+**Pilot shipped: Bouncing Betty.** The first weapon built end-to-end under
+this plan — mechanic redesign, visual, and sound together — as a template
+for the rest of the roster before committing to it everywhere. It also
+fixed a real bug found along the way: bounce-damage points were excluded
+from `allImpacts`, so a bounce that actually damaged a tank produced zero
+client-visible feedback. Shipped: a distinct small "spark" flash for a
+connecting bounce vs. the normal flash for the final detonation
+(`client/src/lib/game/render/projectileRenderer.ts`), and the first real
+audio in the client — two synthesized Web Audio sounds (`ricochet`,
+`impact_light`) via a new minimal `client/src/lib/audio/soundManager.ts`,
+per the sourcing policy in §7.3 below (synthesis was the deliberate choice
+for this single-weapon pilot; sourcing real CC0 assets for the rest of the
+roster is the natural next step once this pilot's approach is confirmed by
+playtest). Everything else in this section remains a plan, not yet built.
 
 ### 7.1 Visual signature per weapon
 
@@ -328,7 +340,7 @@ each weapon's researched real-world/genre character from
 | Napalm | sustained, spreading, incendiary | orange→dark red gradient, wider/longer-lived than a shell flash |
 | Tunneling Shot / Digger | muffled, most of the energy goes into the ground | dust/earth-brown puff at the bore-track marks, dulled flash at final detonation |
 | Digger fizzle (new, §above) | anticlimactic dud | a small grey puff + dim spark, deliberately *not* a bright flash — sells "this one didn't work" |
-| Bouncing Betty | mid-air airburst distinct from a ground hit | brighter/whiter flash than a ground detonation, since it detonates above the surface |
+| Bouncing Betty | **shipped**: every bounce-hit gets a small, fast, sharp-white "spark" (radius 4→10, 150ms) distinct from the final full detonation's normal flash | pale/white spark for a graze, unchanged orange flash for the real blast |
 | Nuke | already scoped as the highest-priority distinct effect (filed above) | white-hot core → orange → smoke, bigger radius and longer duration than every other weapon |
 | Sandhog (new) | detonates from beneath — genre precedent bypasses shields | flash originates *below* the tank sprite, not at ground level, to visually sell "from beneath" |
 | Tracer (new) | non-damaging, no explosion at all | a thin persistent line along the trajectory, no flash |
@@ -358,14 +370,14 @@ category`, per section 3.3): a small hobby project gets more value from 5-6
 well-made shared sounds than 10+ thin/sample-y unique ones. Proposed
 families, each mapped from the gap-analysis research:
 
-1. **Light shell** (fire crack + impact thump) — Basic Shell, Baby Missile, MIRV children, Cluster bomblets.
+1. **Light shell** (fire crack + impact thump) — Basic Shell, Baby Missile, MIRV children, Cluster bomblets. **Shipped as `impact_light`** in the Bouncing Betty pilot (a short synthesized low thump), deliberately generic so it's reusable here once the rest of the roster's sounds are built, rather than a bespoke Betty-only sound.
 2. **Heavy shell** (deeper/louder version of #1) — Heavy Cannonball, Nuke's initial bang.
 3. **Missile whoosh** (sustained launch, not a crack) — Baby Missile's launch specifically (shares #1's impact).
 4. **Muffled/underground** (dulled boom) — Tunneling Shot, Digger's real detonation.
 5. **Dud** (anticlimactic, no boom) — Digger's fizzle-on-tank-hit.
 6. **Incendiary whoosh-crackle** — Napalm.
 7. **Two-phase rumble** (sharp bang, then a long low rumble) — Nuke's follow-through (layers with #2's initial bang).
-8. **Airburst** (propellant pop, then a separate mid-air bang ~0.5s later) — Bouncing Betty.
+8. **Ricochet** (short percussive skip/graze blip) — **shipped** for Bouncing Betty, played once per connecting bounce, staggered ~90ms apart, ending in family #1's `impact_light` at the final resting point. Replaces the original "Airburst" framing (propellant pop + mid-air bang), which was modeled on the S-mine's self-launching real-world behavior and no longer fits the redesigned always-bounces-along-the-ground mechanic.
 
 **Code path**: a new `client/src/lib/audio/soundManager.ts` — a small pool of
 preloaded `HTMLAudioElement`s (or Web Audio `AudioBufferSourceNode`s if

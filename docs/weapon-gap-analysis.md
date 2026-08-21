@@ -142,13 +142,29 @@ file is the source of record).
   propellant charge launches the body ~1m straight up, then a second
   ~0.5s-delay fuze detonates it mid-air, scattering shrapnel 360°. It
   launches itself once — it never skips along the ground.
-- **We have**: reflects off shallow-angle terrain hits (<35°) at ×0.6
-  velocity, up to 3 times, while still in ballistic flight — a
-  skipping-stone behavior — leaving skip-mark divots at each bounce, before a
-  final detonation.
+- **We have (as of the pilot redesign)**: reflects off *every* terrain hit at
+  ×0.6 velocity — no angle gate — for a budget of 3-5 bounces fixed at the
+  first ground contact (flatter first hit = more bounces, steeper = fewer),
+  leaving skip-mark divots at each bounce, before a final full detonation.
+  This replaces the original `<35°`-incidence-gated version, which turned
+  out to be almost unreachable under normal arcing play (a symmetric 45°
+  shot lands at ~45° incidence, never qualifying) — the user had never
+  actually seen a bounce happen because of it. Each bounce deals flat,
+  direct-hit-only damage (`Match.BOUNCE_DAMAGE_FRACTION = 0.25`, 25% of
+  `centerDamage`, no blast falloff) to any tank within `BOUNCE_DAMAGE_RADIUS`
+  (30 units); **confirmed final by the user** — the earlier open question
+  (taper vs. flat vs. distance-falloff) is resolved in favor of keeping it
+  flat, with the explicit constraint that only the final resting point ever
+  triggers the real munition detonation. A bounce that connects also now
+  gets its own small client-side "spark" visual and a ricochet sound,
+  distinct from the final blast's flash/boom (previously bounce damage
+  produced zero visual feedback at all — a bug, fixed alongside the
+  mechanic).
 - **Gap**: the name references a self-launching bounding mine; the behavior
   modeled is a skipping projectile, which is a different real-world thing
-  entirely (closer to a bounced solid cannonball).
+  entirely (closer to a bounced solid cannonball). The damage-per-bounce
+  mechanic itself is a reasonable arcade approximation regardless of that
+  naming gap.
 - **Sound target**: two distinct real events — a propellant "pop" at launch,
   then a separate airburst bang ~0.5s later. Ours currently plays neither
   event distinctly.

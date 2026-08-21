@@ -21,6 +21,8 @@ import type { Point } from '../../protocol/types';
 export const PROJECTILE_ANIMATION_DURATION_MS = 1200;
 /** How long the shared generic post-impact flash lingers, for every weapon except Nuke. */
 const IMPACT_FLASH_DURATION_MS = 250;
+/** Bouncing Betty's bounce-hit spark — smaller/faster than the generic flash, to read as a graze, not an explosion. */
+const BOUNCE_SPARK_DURATION_MS = 150;
 /** Nuke's fireball flash duration — longer than the generic flash so it reads as more dramatic. */
 const NUKE_FLASH_DURATION_MS = 700;
 /** Nuke's smoke puffs outlive the fireball flash; the whole post-impact effect must stay mounted this long. */
@@ -53,6 +55,15 @@ function drawGenericFlash(ctx: CanvasRenderingContext2D, x: number, y: number, f
 	const radius = 6 + flashProgress * 20;
 	ctx.beginPath();
 	ctx.fillStyle = `rgba(255, 160, 40, ${1 - flashProgress})`;
+	ctx.arc(x, y, radius, 0, Math.PI * 2);
+	ctx.fill();
+}
+
+/** Bouncing Betty's bounce-hit "graze" spark — smaller and sharper/whiter than the generic explosion flash. */
+function drawBounceSpark(ctx: CanvasRenderingContext2D, x: number, y: number, sparkProgress: number): void {
+	const radius = 4 + sparkProgress * 6;
+	ctx.beginPath();
+	ctx.fillStyle = `rgba(255, 240, 210, ${1 - sparkProgress})`;
 	ctx.arc(x, y, radius, 0, Math.PI * 2);
 	ctx.fill();
 }
@@ -127,7 +138,15 @@ export function drawProjectile(
 	const effectDuration = isNuke ? NUKE_EFFECT_DURATION_MS : IMPACT_FLASH_DURATION_MS;
 	if (flashElapsed > effectDuration) return;
 
-	for (const point of impacts) {
+	// Bouncing Betty: every impact point except the last is a bounce that
+	// grazed a tank (a direct-hit-only graze, no blast radius — see
+	// Match.BOUNCE_DAMAGE_FRACTION) and gets the smaller/faster spark; the
+	// last point is always the real detonation (server-side ordering: bounce
+	// points are added to `detonations` before the final impact) and gets
+	// the normal flash, same as every other weapon.
+	const isBouncingBetty = weaponId === 'bouncing_betty';
+
+	impacts.forEach((point, index) => {
 		const { x, y } = worldToCanvas(point.x, point.y, viewport);
 		if (isNuke) {
 			// Seed varies per impact point so multiple simultaneous nuke
@@ -135,13 +154,18 @@ export function drawProjectile(
 			// but handled generically since `impacts` is always a list)
 			// don't look identical.
 			drawNukeEffect(ctx, x, y, flashElapsed, point.x * 1000 + point.y * 37);
+		} else if (isBouncingBetty && index < impacts.length - 1) {
+			const sparkProgress = flashElapsed / BOUNCE_SPARK_DURATION_MS;
+			if (sparkProgress <= 1) {
+				drawBounceSpark(ctx, x, y, sparkProgress);
+			}
 		} else {
 			const flashProgress = flashElapsed / IMPACT_FLASH_DURATION_MS;
 			if (flashProgress <= 1) {
 				drawGenericFlash(ctx, x, y, flashProgress);
 			}
 		}
-	}
+	});
 }
 
 export function isAnimationFinished(elapsedMs: number, weaponId?: string): boolean {
