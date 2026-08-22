@@ -68,6 +68,12 @@
 	// "it can not be 100 percent accurate otherwise it is not fun").
 	const PREVIEW_LAUNCH_HEIGHT_OFFSET = 17;
 
+	// Trajectory Help is deliberately unavailable for Nuke (per user
+	// decision, 2026-08-23 — not a bug: a rare/premium weapon shouldn't get
+	// an aim assist). FireControls.svelte shows the button as disabled and
+	// this skips drawing the dotted preview to match.
+	const NUKE_WEAPON_ID = 'nuke';
+
 	// Tracks which shot's sound sequence has already been triggered, so it
 	// fires exactly once per shot rather than every frame the flight-end
 	// condition below is true. Bouncing Betty only, for this pilot — see
@@ -131,14 +137,16 @@
 			drawTanks(ctx, playersToDraw, viewport, aimAngleByPlayerId);
 			drawShields(ctx, playersToDraw, viewport, performance.now());
 
-			if (trajectoryHelpEnabled && localPlayer && localPlayer.tank.alive && !activeShot) {
+			if (
+				trajectoryHelpEnabled &&
+				localPlayer &&
+				localPlayer.tank.alive &&
+				!activeShot &&
+				selectedWeaponId !== NUKE_WEAPON_ID
+			) {
 				// Defensive: an exception here would otherwise propagate out of
 				// frame() and silently stop the whole rAF loop (the trailing
-				// requestAnimationFrame(frame) call below never runs) — per user
-				// report, 2026-08-22, the preview/toggle appeared to "break" for
-				// Nuke specifically, though no reproducible cause was found in
-				// the physics math itself. This guard at minimum prevents a
-				// single weapon's preview from ever taking the whole canvas down.
+				// requestAnimationFrame(frame) call below never runs).
 				try {
 					const physics = WEAPON_PHYSICS[selectedWeaponId] ?? { powerScaleMultiplier: 1.0, gravityMultiplier: 1.0 };
 					const points = computeTrajectoryPreview(

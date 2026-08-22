@@ -15,6 +15,7 @@
 
 	import { sendFire } from '../../game/input/fireInput';
 	import { sendAimUpdate } from '../../game/input/aimInput';
+	import { sendTrajectoryHelpUpdate } from '../../game/input/trajectoryHelpInput';
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
 	import { aimStore } from '../../stores/aimStore';
@@ -52,11 +53,23 @@
 	// already optimistically played the launch sound).
 	$: fireDisabled = disabled || !hasAmmo(loadout[$weaponSelectStore]);
 
+	// Trajectory Help is deliberately unavailable for Nuke (user decision,
+	// 2026-08-23 — a rare/premium weapon shouldn't get an aim assist, not a
+	// bug to fix). Button reads disabled and the dotted preview is
+	// suppressed in GameCanvas.svelte's NUKE_WEAPON_ID check.
+	$: trajectoryHelpUnavailable = $weaponSelectStore === 'nuke';
+
 	// Broadcasts the local player's live aim angle so every connected client's
 	// tankRenderer can show this tank's barrel tracking it, not just the
 	// local view — throttled inside sendAimUpdate. Not turn-gated, matching
 	// the sliders themselves staying enabled outside your turn.
 	$: sendAimUpdate($aimStore.angleDeg);
+
+	// Broadcasts the local player's Trajectory Help on/off toggle so it can be
+	// shown in every connected client's players list (per user request,
+	// 2026-08-23) — same not-turn-gated, always-live pattern as the aim
+	// broadcast above.
+	$: sendTrajectoryHelpUpdate($trajectoryHelpStore);
 
 	function fire(): void {
 		if (fireDisabled) return;
@@ -99,11 +112,14 @@
 	<button
 		type="button"
 		class="trajectory-help-button"
-		class:active={$trajectoryHelpStore}
+		class:active={$trajectoryHelpStore && !trajectoryHelpUnavailable}
+		disabled={trajectoryHelpUnavailable}
 		on:click={() => trajectoryHelpStore.toggle()}
-		title="Show a dotted preview of where the shot would land — accounts for the weapon's weight, ignores wind"
+		title={trajectoryHelpUnavailable
+			? 'Trajectory Help is not available for Nuke'
+			: "Show a dotted preview of where the shot would land — accounts for the weapon's weight, ignores wind"}
 	>
-		Trajectory Help: {$trajectoryHelpStore ? 'On' : 'Off'}
+		Trajectory Help: {trajectoryHelpUnavailable ? 'N/A' : $trajectoryHelpStore ? 'On' : 'Off'}
 	</button>
 
 	<button class="fire-button" on:click={fire} disabled={fireDisabled}>
@@ -165,6 +181,13 @@
 		border-color: #4a9;
 		background: rgba(74, 170, 153, 0.18);
 		color: #7fd9c4;
+	}
+
+	.trajectory-help-button:disabled {
+		background: #1a1a1a;
+		color: #666;
+		border-color: #333;
+		cursor: default;
 	}
 
 	.fire-button {

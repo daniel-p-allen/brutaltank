@@ -256,7 +256,7 @@ Cover in-round play: turn order, firing, shot resolution, and round lifecycle (`
 #### `Fire`
 
 ```json
-{ "type": "Fire", "v": 1, "requestId": "r10", "payload": { "weaponId": "basic_shell", "angleDeg": 42.5, "power": 78 } }
+{ "type": "Fire", "v": 1, "requestId": "r10", "payload": { "weaponId": "basic_shell", "angleDeg": 42.5, "power": 78, "trajectoryHelpUsed": false } }
 ```
 
 | Field | Type | Required | Notes |
@@ -264,6 +264,7 @@ Cover in-round play: turn order, firing, shot resolution, and round lifecycle (`
 | `weaponId` | string | yes | Id of the weapon (or shield, see section 3.6/4.4 of the plan — shield activation is also sent as `Fire` with a shield id) being used this turn. |
 | `angleDeg` | number | yes | Firing angle in degrees. Client input only — never trusted as an outcome; server recomputes everything. |
 | `power` | number | yes | Firing power, 0-100 scale (client-defined range; server clamps/validates). |
+| `trajectoryHelpUsed` | boolean | no (default false) | Whether the client had Trajectory Help toggled on for this shot (per user decision, 2026-08-23: firing *without* it grants a risk/reward bonus — see `Match.applyDetonations`'s `damageMultiplier`/`cashMultiplier`, +25% damage and 2x cash on this shot's own detonation/bounce damage when false). Since Trajectory Help is permanently unavailable for Nuke, a Nuke `Fire` always effectively carries `false` and always gets the bonus. **Trusted client value, not independently re-derivable server-side** (Trajectory Help is a purely client-side visual aid with no other footprint on game state) — acceptable for this project's private/friends threat model, same trust level as `angleDeg`/`power` inputs, just not an "outcome" the server can cross-check. |
 
 Only accepted from the player whose turn it currently is (`AWAITING_FIRE` state); otherwise rejected with `FireRejected`.
 
@@ -275,6 +276,14 @@ Only accepted from the player whose turn it currently is (`AWAITING_FIRE` state)
 
 Cosmetic-only live aim broadcast, **not turn-gated** — any player can drag their aim slider at any time (angle sliders stay enabled outside your turn, per user feedback) and have their tank's barrel visibly track it on every connected client, not just their own. No `requestId`/reply; the server simply relays it as `PlayerAiming` to everyone in the match, including back to the sender. Never validated against game state and never affects gameplay — purely rendering. Sent throttled by the client (not on every pixel of slider drag) to keep traffic light.
 
+#### `TrajectoryHelpUpdate`
+
+```json
+{ "type": "TrajectoryHelpUpdate", "v": 1, "payload": { "enabled": true } }
+```
+
+Sent whenever the local player toggles their Trajectory Help button. Like `AimUpdate`, **not turn-gated**, no `requestId`/reply — the server relays it as `PlayerTrajectoryHelp` to everyone in the match so every client can show every player's current on/off status (per user request, 2026-08-23: shown per-player in the players list alongside cash). Purely informational; the server does not use this live-broadcast value to decide the risk/reward bonus — that's read fresh off each `Fire`'s own `trajectoryHelpUsed` field, since a player could toggle it between shots.
+
 ### Server → Client
 
 #### `PlayerAiming`
@@ -284,6 +293,14 @@ Cosmetic-only live aim broadcast, **not turn-gated** — any player can drag the
 ```
 
 Broadcast relay of an `AimUpdate` to every connected client. `tankRenderer` uses this (keyed by `playerId`) to draw every tank's barrel at its last-known live angle, falling back to a neutral default for any player who hasn't sent one yet this session.
+
+#### `PlayerTrajectoryHelp`
+
+```json
+{ "type": "PlayerTrajectoryHelp", "v": 1, "payload": { "playerId": "p-2", "enabled": true } }
+```
+
+Broadcast relay of a `TrajectoryHelpUpdate` to every connected client. The players list (`MatchScreen.svelte`) uses this, keyed by `playerId`, to show each player's current Trajectory Help on/off status next to their name/cash — defaults to "off" for any player who hasn't sent one yet this session.
 
 #### `TurnStarted`
 

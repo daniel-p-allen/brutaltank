@@ -528,7 +528,7 @@ class WeaponAndShieldTest {
         applyDetonations.setAccessible(true);
         applyDetonations.invoke(match, shooterMatchPlayer, "bouncing_betty",
                 Collections.emptyList(), 0.0, 0.0, Collections.emptyList(),
-                bounceDamagePoints, bounceDamagePerHit);
+                bounceDamagePoints, bounceDamagePerHit, true);
 
         double healthAfter = match.healthOf(target.playerId());
         double actualDrop = healthBefore - healthAfter;
@@ -573,6 +573,64 @@ class WeaponAndShieldTest {
 
         // basic_shell (-1 == unlimited) must never decrement, despite 5 real shots fired above.
         assertEquals(-1, match.loadoutQtyOf(p2.playerId(), "basic_shell"));
+    }
+
+    // -----------------------------------------------------------------
+    // Risk/reward: firing without Trajectory Help does +25% damage and 2x
+    // cash on that shot (user decision, 2026-08-23).
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void firingWithoutTrajectoryHelpDoesMoreDamageAndEarnsMoreCash() {
+        double angle = 30;
+        double power = 60;
+        double[] tip = barrelTip(200, 500, angle);
+        ProjectileSim.Result predicted = ProjectileSim.simulate(tip[0], tip[1], angle, power, 0,
+                flatTerrain(1600, 500), Collections.emptyList(), WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
+
+        Match withHelp = newMatch("m-help");
+        Joined helpShooter = join(withHelp, "Shooter");
+        Joined helpTarget = join(withHelp, "Target");
+        withHelp.setReady(helpShooter.playerId(), true);
+        withHelp.setReady(helpTarget.playerId(), true);
+        withHelp.debugSetTerrain(flatTerrain(1600, 500));
+        withHelp.debugSetWind(0);
+        withHelp.debugSetTankPosition(helpShooter.playerId(), 200, 500);
+        withHelp.debugSetTankPosition(helpTarget.playerId(), predicted.impactX, predicted.impactY);
+        int helpCashBefore = withHelp.cashOf(helpShooter.playerId());
+        double helpHealthBefore = withHelp.healthOf(helpTarget.playerId());
+        assertTrue(withHelp.fire(helpShooter.playerId(), "r1", "basic_shell", angle, power, true).accepted());
+        double helpDamageDealt = helpHealthBefore - withHelp.healthOf(helpTarget.playerId());
+        int helpCashEarned = withHelp.cashOf(helpShooter.playerId()) - helpCashBefore;
+
+        Match noHelp = newMatch("m-no-help");
+        Joined noHelpShooter = join(noHelp, "Shooter");
+        Joined noHelpTarget = join(noHelp, "Target");
+        noHelp.setReady(noHelpShooter.playerId(), true);
+        noHelp.setReady(noHelpTarget.playerId(), true);
+        noHelp.debugSetTerrain(flatTerrain(1600, 500));
+        noHelp.debugSetWind(0);
+        noHelp.debugSetTankPosition(noHelpShooter.playerId(), 200, 500);
+        noHelp.debugSetTankPosition(noHelpTarget.playerId(), predicted.impactX, predicted.impactY);
+        int noHelpCashBefore = noHelp.cashOf(noHelpShooter.playerId());
+        double noHelpHealthBefore = noHelp.healthOf(noHelpTarget.playerId());
+        assertTrue(noHelp.fire(noHelpShooter.playerId(), "r1", "basic_shell", angle, power, false).accepted());
+        double noHelpDamageDealt = noHelpHealthBefore - noHelp.healthOf(noHelpTarget.playerId());
+        int noHelpCashEarned = noHelp.cashOf(noHelpShooter.playerId()) - noHelpCashBefore;
+
+        assertEquals(Math.round(helpDamageDealt * 1.25), noHelpDamageDealt, 1.0,
+                "no-help shot should deal ~25% more damage: withHelp=" + helpDamageDealt + " noHelp=" + noHelpDamageDealt);
+        // Cash is earned from the shot's actual damage dealt (CASH_PER_DAMAGE
+        // per point), which is itself already +25% boosted here — so the two
+        // bonuses compound (1.25 damage x 2.0 cash-rate = ~2.5x total cash),
+        // not a flat 2x. That's the intended interaction (cash tracks real
+        // damage dealt, same as every other shot), not a bug.
+        double cashRatio = (double) noHelpCashEarned / helpCashEarned;
+        assertTrue(cashRatio > 2.3 && cashRatio < 2.7,
+                "no-help shot should earn ~2.5x cash (2x rate on already-boosted damage), several independent "
+                        + "roundings make an exact multiple fragile so this allows some slack: withHelp="
+                        + helpCashEarned + " noHelp=" + noHelpCashEarned + " ratio=" + cashRatio);
     }
 
     // -----------------------------------------------------------------

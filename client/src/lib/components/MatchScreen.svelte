@@ -64,6 +64,13 @@
 			{#each $matchStore.players as player (player.playerId)}
 				<span class="player" style="color: {player.color}">
 					{player.displayName}: {player.tank.health} hp{player.tank.alive ? '' : ' (destroyed)'}
+					<span class="player-cash">${player.cash}</span>
+					<span
+						class="trajectory-help-badge"
+						class:on={$matchStore.remoteTrajectoryHelp[player.playerId]}
+					>
+						help: {$matchStore.remoteTrajectoryHelp[player.playerId] ? 'on' : 'off'}
+					</span>
 					{#if $matchStore.disconnectedPlayerIds.includes(player.playerId)}
 						<span class="disconnected-badge">disconnected</span>
 					{/if}
@@ -157,6 +164,21 @@
 		margin-left: 0.25rem;
 		font-size: 0.7rem;
 		color: #e0a020;
+	}
+
+	.player-cash {
+		margin-left: 0.4rem;
+		color: #7fd9a0;
+	}
+
+	.trajectory-help-badge {
+		margin-left: 0.4rem;
+		font-size: 0.75rem;
+		color: #666;
+	}
+
+	.trajectory-help-badge.on {
+		color: #7fd9c4;
 	}
 
 	.round-end-overlay {

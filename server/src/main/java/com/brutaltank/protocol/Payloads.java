@@ -147,11 +147,20 @@ public final class Payloads {
         }
     }
 
-    /** Client -> Server: {@code Fire{weaponId, angleDeg, power}}. */
+    /** Client -> Server: {@code Fire{weaponId, angleDeg, power, trajectoryHelpUsed}}. */
     public static final class Fire {
         public String weaponId;
         public double angleDeg;
         public double power;
+        /**
+         * Whether the client had Trajectory Help toggled on for this shot
+         * (per user decision, 2026-08-23: firing without it grants a
+         * risk/reward bonus — see Match.applyDetonations's
+         * damageMultiplier/cashMultiplier). Defaults to false (Jackson's
+         * primitive-boolean default) for any older client that doesn't send
+         * it, which is the "no help, get the bonus" side — a safe default.
+         */
+        public boolean trajectoryHelpUsed;
 
         public Fire() {
         }
@@ -183,6 +192,34 @@ public final class Payloads {
         public PlayerAiming(String playerId, double angleDeg) {
             this.playerId = playerId;
             this.angleDeg = angleDeg;
+        }
+    }
+
+    /**
+     * Client -> Server: {@code TrajectoryHelpUpdate{enabled}}. Cosmetic-only,
+     * not turn-gated, same pattern as {@link AimUpdate} — relayed as {@link
+     * PlayerTrajectoryHelp} so every client can show every player's current
+     * Trajectory Help on/off status (per user request, 2026-08-23: shown per
+     * player in the players list alongside cash).
+     */
+    public static final class TrajectoryHelpUpdate {
+        public boolean enabled;
+
+        public TrajectoryHelpUpdate() {
+        }
+    }
+
+    /** Server -> Client: {@code PlayerTrajectoryHelp{playerId, enabled}}, broadcast relay of a TrajectoryHelpUpdate. */
+    public static final class PlayerTrajectoryHelp {
+        public String playerId;
+        public boolean enabled;
+
+        public PlayerTrajectoryHelp() {
+        }
+
+        public PlayerTrajectoryHelp(String playerId, boolean enabled) {
+            this.playerId = playerId;
+            this.enabled = enabled;
         }
     }
 

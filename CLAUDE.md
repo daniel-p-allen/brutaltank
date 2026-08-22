@@ -92,16 +92,42 @@ verification is done; see its `PLAN.md` Future Ideas entry.
    `applyShopOpened`; also bumped the shop's backup timer 30s -> 120s since
    `ShopContinue` is now the primary way it ends.
 
-**Bugs filed but not yet resolved** (`PLAN.md` Future Ideas — read each
-entry there for full investigation notes before touching):
-- Digger passing through a tank without registering a hit.
-- A tank's fall animation appearing to trigger before its incoming
-  projectile actually lands.
-- **Trajectory Help doesn't work for Nuke** (button reads disabled, no
-  preview shown, until a different weapon is selected) — investigated,
-  not resolved; confirmed still reproducing on retest. No root cause found
-  yet; get a screenshot/recording before investigating further, the verbal
-  report supported two different readings once already.
+**Two more real bugs fixed 2026-08-23** (see `PLAN.md`'s Future Ideas
+entries for full detail):
+5. **Digger/Tunneling Shot could pass through a tank underground without
+   registering a hit.** `ProjectileSim`'s TUNNELING branch skipped the
+   tank-hit check entirely once penetration began. Fixed by checking it
+   every underground step too; regression test added
+   (`ProjectileSimTest.tunnelingRegistersATankHitEncounteredWhileUnderground`).
+6. **A tank's fall animation triggered before its incoming shot visually
+   landed.** `GameCanvas.svelte` already deferred rendering terrain/health
+   during the flight animation (`preShotHeights`/`preShotHealth`) but not
+   tank Y position, so a tank whose ground gave way snapped to its fallen
+   spot the instant `ShotResolved` arrived. Fixed with a matching
+   `preShotTankY` threaded through `matchStore.ts` ->
+   `shotAnimationStore.ts` -> `GameCanvas.svelte`.
+
+**Trajectory Help is intentionally unavailable for Nuke** (not a bug — user
+decision, 2026-08-23: a rare/premium weapon shouldn't get an aim assist).
+What looked like a bug on 2026-08-22 (button reading disabled, no preview,
+for Nuke specifically) is now built deliberately:
+`FireControls.svelte`'s `trajectoryHelpUnavailable` disables the button
+(label reads "N/A") and `GameCanvas.svelte`'s `NUKE_WEAPON_ID` check
+suppresses the dotted preview, both keyed off `weaponSelectStore === 'nuke'`.
+
+**Risk/reward for skipping Trajectory Help, same session (2026-08-23):**
+firing without it grants +25% damage and 2x cash on that shot (the two
+compound to ~2.5x cash — confirmed as intended, not a bug — since cash is
+earned from the already-boosted damage). `Fire.trajectoryHelpUsed`
+(client-trusted, see `shared/protocol.md`) drives
+`Match.applyDetonations`'s multipliers; Nuke always gets the bonus since
+help is never available there. Building this surfaced a real gap: player
+cash was never live-updated from `ShotResolved.cashEarned` client-side
+(only from `ShopUpdate`/`TurnForfeited`) — fixed in `matchStore.ts`'s
+`applyShotResolved`. Also added a new live broadcast pair,
+`TrajectoryHelpUpdate`/`PlayerTrajectoryHelp` (mirrors `AimUpdate`/
+`PlayerAiming`), so `MatchScreen.svelte`'s players list can show every
+player's live cash and Trajectory Help on/off status, per user request.
 
 ## Where the weapon/shield research and design work lives
 

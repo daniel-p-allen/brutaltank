@@ -28,6 +28,8 @@
 //                          ShopPurchases (shopErrorReason).
 //   - PlayerAiming      -> records a player's live aim angle (remoteAim),
 //                          cosmetic-only, not turn-gated.
+//   - PlayerTrajectoryHelp -> records a player's live Trajectory Help on/off
+//                          status (remoteTrajectoryHelp), same as PlayerAiming.
 //
 // See shared/protocol.md sections 3-4 for the message shapes this store
 // must stay in lockstep with.
@@ -42,6 +44,7 @@ import type {
 	MatchStateSyncPayload,
 	Player,
 	PlayerAimingPayload,
+	PlayerTrajectoryHelpPayload,
 	PriceListEntry,
 	RoundEndedPayload,
 	ShopOpenedPayload,
@@ -98,6 +101,14 @@ export interface MatchState {
 	 * MatchStateSync since a fresh round/reconnect has no live values yet.
 	 */
 	remoteAim: Record<string, number>;
+	/**
+	 * Every player's last-known Trajectory Help on/off status (from
+	 * PlayerTrajectoryHelp broadcasts), keyed by playerId — same rationale
+	 * and lifecycle as remoteAim, shown in the players list per user
+	 * request, 2026-08-23. Missing entry means "off" (nobody's sent one yet
+	 * this session).
+	 */
+	remoteTrajectoryHelp: Record<string, boolean>;
 }
 
 function initialState(): MatchState {
@@ -121,7 +132,8 @@ function initialState(): MatchState {
 		matchEndedInfo: null,
 		shop: null,
 		shopErrorReason: null,
-		remoteAim: {}
+		remoteAim: {},
+		remoteTrajectoryHelp: {}
 	};
 }
 
@@ -149,7 +161,8 @@ export function applyMatchStateSync(payload: MatchStateSyncPayload): MatchState 
 		matchEndedInfo: null,
 		shop: null,
 		shopErrorReason: null,
-		remoteAim: {}
+		remoteAim: {},
+		remoteTrajectoryHelp: {}
 	};
 }
 
@@ -172,18 +185,29 @@ export function applyShotResolved(state: MatchState, payload: ShotResolvedPayloa
 
 	const healthByPlayer = new Map(payload.damageEvents.map((e) => [e.playerId, e]));
 	const fallByPlayer = new Map((payload.tankFalls ?? []).map((f) => [f.playerId, f]));
+	// A shot can earn its shooter multiple CashEarned entries (damage cash,
+	// elimination bonus, a shield's cashback) — sum per player rather than
+	// assuming one entry each, so a player's cash stays live-accurate turn
+	// to turn instead of only refreshing on the next round's MatchStateSync
+	// (needed for the players-list cash display, per user request 2026-08-23).
+	const cashGainedByPlayer = new Map<string, number>();
+	for (const c of payload.cashEarned) {
+		cashGainedByPlayer.set(c.playerId, (cashGainedByPlayer.get(c.playerId) ?? 0) + c.amount);
+	}
 	const players = state.players.map((p) => {
 		const dmg = healthByPlayer.get(p.playerId);
 		const fall = fallByPlayer.get(p.playerId);
+		const cashGained = cashGainedByPlayer.get(p.playerId);
 		// The shooter's ammo count for weaponId decrements on every shot server-side,
 		// but without this the client only ever saw it refresh on the next full
 		// MatchStateSync (i.e. the next round) — see ShotResolvedPayload.ammoRemaining.
 		const isShooter = p.playerId === payload.shooterId;
 		const activatedShieldId = isShooter && SHIELD_IDS.has(payload.weaponId) ? payload.weaponId : null;
-		if (!dmg && !fall && !isShooter) return p;
+		if (!dmg && !fall && !isShooter && !cashGained) return p;
 		return {
 			...p,
 			...(isShooter ? { loadout: { ...p.loadout, [payload.weaponId]: payload.ammoRemaining } } : {}),
+			...(cashGained ? { cash: p.cash + cashGained } : {}),
 			...(activatedShieldId ? { activeShieldId: activatedShieldId } : {}),
 			...(dmg ? { activeShieldId: dmg.activeShieldId } : {}),
 			tank: {
@@ -281,6 +305,14 @@ export function applyErrorMsg(state: MatchState, payload: ErrorMsgPayload): Matc
 /** Pure helper (exported for unit testing): records a player's live aim angle from a PlayerAiming broadcast. */
 export function applyPlayerAiming(state: MatchState, payload: PlayerAimingPayload): MatchState {
 	return { ...state, remoteAim: { ...state.remoteAim, [payload.playerId]: payload.angleDeg } };
+}
+
+/** Pure helper (exported for unit testing): records a player's live Trajectory Help on/off status from a PlayerTrajectoryHelp broadcast. */
+export function applyPlayerTrajectoryHelp(state: MatchState, payload: PlayerTrajectoryHelpPayload): MatchState {
+	return {
+		...state,
+		remoteTrajectoryHelp: { ...state.remoteTrajectoryHelp, [payload.playerId]: payload.enabled }
+	};
 }
 
 /** Pure helper (exported for unit testing): applies a missed-turn cash penalty, and bankruptcy elimination if it brought cash to 0. */
@@ -394,6 +426,10 @@ function createMatchStore() {
 
 			case 'PlayerAiming':
 				update((state) => applyPlayerAiming(state, envelope.payload as PlayerAimingPayload));
+				return;
+
+			case 'PlayerTrajectoryHelp':
+				update((state) => applyPlayerTrajectoryHelp(state, envelope.payload as PlayerTrajectoryHelpPayload));
 				return;
 
 			case 'TurnForfeited':

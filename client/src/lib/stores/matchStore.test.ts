@@ -113,6 +113,28 @@ describe('matchStore', () => {
 		const p1 = state.players.find((p) => p.playerId === 'p-1')!;
 		expect(p1.tank.health).toBe(100); // untouched, no damageEvent for p-1
 		expect(p1.loadout.basic_shell).toBe(4); // shooter's ammo count for weaponId decrements live
+		expect(p1.cash).toBe(610); // 500 starting + 110 cashEarned, applied live rather than waiting for the next round's MatchStateSync
+	});
+
+	it('sums multiple cashEarned entries for the same player (e.g. damage cash + elimination bonus)', () => {
+		const state = applyShotResolved(applyMatchStateSync(samplePayload), {
+			shooterId: 'p-1',
+			weaponId: 'basic_shell',
+			trajectory: [],
+			impact: { x: 8, y: 108 },
+			terrainDelta: { startX: 0, endX: 0, heights: [99] },
+			damageEvents: [{ playerId: 'p-2', damage: 100, newHealth: 0, eliminated: true, activeShieldId: null }],
+			cashEarned: [
+				{ playerId: 'p-1', amount: 500 },
+				{ playerId: 'p-1', amount: 100 }
+			],
+			tankFalls: [],
+			ammoRemaining: -1,
+			allImpacts: []
+		});
+
+		const p1 = state.players.find((p) => p.playerId === 'p-1')!;
+		expect(p1.cash).toBe(1100); // 500 starting + 500 + 100 summed
 	});
 
 	it('marks eliminated when newHealth <= 0 / eliminated true', () => {
@@ -444,6 +466,25 @@ describe('matchStore', () => {
 			JSON.stringify({ type: 'PlayerAiming', v: 1, payload: { playerId: 'p-2', angleDeg: 12 } })
 		);
 		expect(get(matchStore).remoteAim).toEqual({ 'p-2': 12, 'p-1': 30 });
+	});
+
+	it('records live Trajectory Help on/off status per player from PlayerTrajectoryHelp', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerTrajectoryHelp', v: 1, payload: { playerId: 'p-2', enabled: true } })
+		);
+		expect(get(matchStore).remoteTrajectoryHelp).toEqual({ 'p-2': true });
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'PlayerTrajectoryHelp', v: 1, payload: { playerId: 'p-2', enabled: false } })
+		);
+		expect(get(matchStore).remoteTrajectoryHelp).toEqual({ 'p-2': false });
 	});
 
 	it('clears the shop on MatchEnded', async () => {

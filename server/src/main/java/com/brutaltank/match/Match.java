@@ -509,7 +509,28 @@ public final class Match {
         broadcast("PlayerAiming", new Payloads.PlayerAiming(playerId, angleDeg));
     }
 
+    /**
+     * Cosmetic-only live relay of a player's Trajectory Help on/off toggle
+     * (mirrors {@link #updateAim}) — purely informational for the players
+     * list; the actual risk/reward bonus is read fresh off each {@code Fire}
+     * message's own {@code trajectoryHelpUsed} field, not this live value,
+     * since a player can toggle between shots.
+     */
+    public synchronized void updateTrajectoryHelp(String playerId, boolean enabled) {
+        MatchPlayer mp = players.get(playerId);
+        if (mp == null || mp.departed) {
+            return;
+        }
+        broadcast("PlayerTrajectoryHelp", new Payloads.PlayerTrajectoryHelp(playerId, enabled));
+    }
+
+    /** Convenience overload for callers (mainly tests) that don't care about the no-help risk/reward bonus — assumes help was used, i.e. no bonus. */
     public synchronized FireOutcome fire(String playerId, String requestId, String weaponId, double angleDeg, double power) {
+        return fire(playerId, requestId, weaponId, angleDeg, power, true);
+    }
+
+    public synchronized FireOutcome fire(String playerId, String requestId, String weaponId, double angleDeg,
+                                          double power, boolean trajectoryHelpUsed) {
         if (status != Status.IN_PROGRESS) {
             return FireOutcome.rejected("MATCH_NOT_IN_PROGRESS");
         }
@@ -540,7 +561,7 @@ public final class Match {
             shooter.player.loadout.put(weaponId, qty - 1);
         }
 
-        Payloads.ShotResolved resolved = resolveShot(shooter, weaponId, angleDeg, power);
+        Payloads.ShotResolved resolved = resolveShot(shooter, weaponId, angleDeg, power, trajectoryHelpUsed);
         resolveTurnAdvance(resolved, requestId);
         return FireOutcome.ok(resolved);
     }
@@ -887,6 +908,18 @@ public final class Match {
     // bounce, not squarely hit" radius is a genuinely different case.
     private static final double BOUNCE_DAMAGE_RADIUS = 30.0;
 
+    // Risk/reward bonus for firing without Trajectory Help (user decision,
+    // 2026-08-23: "if you choose NOT to use the trajectory help, your
+    // earnings are doubled and damage is 25% more"). Applied in
+    // applyDetonations to this shot's own blast/bounce damage and the cash
+    // earned from it — deliberately NOT applied to fall damage (an
+    // incidental terrain-collapse side effect, not something the shooter's
+    // aim choice caused). Since Trajectory Help is permanently unavailable
+    // for Nuke (see FireControls.svelte's trajectoryHelpUnavailable), every
+    // Nuke shot always gets this bonus (confirmed with the user).
+    private static final double NO_HELP_DAMAGE_MULTIPLIER = 1.25;
+    private static final double NO_HELP_CASH_MULTIPLIER = 2.0;
+
     // Tank-fall tuning (PLAN.md-adjacent, per live-playtest feedback): a
     // tank whose column's ground drops out from under it (crater, gully, or
     // the post-crater slope-settle pass) snaps down to the new ground level
@@ -905,7 +938,8 @@ public final class Match {
     static final double TANK_WORLD_HEIGHT = 17.0;
     static final double BARREL_LENGTH = 30.0 * 1.15;
 
-    private Payloads.ShotResolved resolveShot(MatchPlayer shooter, String weaponId, double angleDeg, double power) {
+    private Payloads.ShotResolved resolveShot(MatchPlayer shooter, String weaponId, double angleDeg, double power,
+                                               boolean trajectoryHelpUsed) {
         if (ShieldDef.isShieldId(weaponId)) {
             return resolveShieldActivation(shooter, weaponId);
         }
@@ -1070,7 +1104,7 @@ public final class Match {
         }
 
         return applyDetonations(shooter, weaponId, mergedTrajectory, impactX, impactY, detonations,
-                bounceDamagePoints, bounceDamagePerHit);
+                bounceDamagePoints, bounceDamagePerHit, trajectoryHelpUsed);
     }
 
     /**
@@ -1120,7 +1154,10 @@ public final class Match {
     private Payloads.ShotResolved applyDetonations(MatchPlayer shooter, String weaponId,
                                                      List<double[]> trajectory, double impactX, double impactY,
                                                      List<DetonationSpec> detonations,
-                                                     List<double[]> bounceDamagePoints, double bounceDamagePerHit) {
+                                                     List<double[]> bounceDamagePoints, double bounceDamagePerHit,
+                                                     boolean trajectoryHelpUsed) {
+        double damageMultiplier = trajectoryHelpUsed ? 1.0 : NO_HELP_DAMAGE_MULTIPLIER;
+        double cashMultiplier = trajectoryHelpUsed ? 1.0 : NO_HELP_CASH_MULTIPLIER;
         Map<String, Double> workingHealth = new LinkedHashMap<>();
         for (MatchPlayer p : players.values()) {
             if (!p.departed && p.player.tank.alive) {
@@ -1147,6 +1184,7 @@ public final class Match {
         // all (only the health change), since bounce points are otherwise
         // added to `detonations` with centerDamage=0 (cosmetic skip-mark
         // only) and excluded from allImpacts on that basis.
+        double effectiveBounceDamagePerHit = bounceDamagePerHit * damageMultiplier;
         List<double[]> connectedBouncePoints = new ArrayList<>();
         for (double[] bp : bounceDamagePoints) {
             for (MatchPlayer p : players.values()) {
@@ -1157,7 +1195,7 @@ public final class Match {
                 if (distance(p.player.tank.x, p.player.tank.y, bp[0], bp[1]) > BOUNCE_DAMAGE_RADIUS) {
                     continue;
                 }
-                double mitigatedDamage = applyShieldMitigation(p, bounceDamagePerHit, true, cashEarned);
+                double mitigatedDamage = applyShieldMitigation(p, effectiveBounceDamagePerHit, true, cashEarned);
                 double newHealth = Math.max(0.0, Math.round(hp - mitigatedDamage));
                 boolean eliminated = newHealth <= 0.0;
                 workingHealth.put(p.player.playerId, newHealth);
@@ -1169,7 +1207,7 @@ public final class Match {
                         new Payloads.DamageEvent(p.player.playerId, cumulativeDamage, newHealth, eliminated, p.player.activeShieldId));
 
                 if (!p.player.playerId.equals(shooter.player.playerId)) {
-                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
+                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE * cashMultiplier);
                 }
             }
         }
@@ -1190,7 +1228,7 @@ public final class Match {
             }
 
             DamageCalculator.Outcome outcome = DamageCalculator.resolve(
-                    shooter.player.playerId, d.x(), d.y(), d.blastRadius(), d.centerDamage(), tankStates);
+                    shooter.player.playerId, d.x(), d.y(), d.blastRadius(), d.centerDamage() * damageMultiplier, tankStates);
 
             for (DamageCalculator.DamageResult dr : outcome.damageEvents) {
                 MatchPlayer target = players.get(dr.playerId());
@@ -1208,7 +1246,7 @@ public final class Match {
                 damageByPlayer.put(dr.playerId(), new Payloads.DamageEvent(dr.playerId(), cumulativeDamage, newHealth, eliminated, target.player.activeShieldId));
 
                 if (!dr.playerId().equals(shooter.player.playerId)) {
-                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE);
+                    cashFromDamage += (int) Math.round(mitigatedDamage * DamageCalculator.CASH_PER_DAMAGE * cashMultiplier);
                 }
             }
         }

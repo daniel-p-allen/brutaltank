@@ -88,6 +88,13 @@ export interface FirePayload {
 	weaponId: string;
 	angleDeg: number;
 	power: number;
+	/**
+	 * Whether Trajectory Help was toggled on for this shot (per user
+	 * decision, 2026-08-23: firing without it earns a risk/reward bonus —
+	 * see shared/protocol.md's Fire section). Always false for Nuke since
+	 * Trajectory Help is permanently unavailable there.
+	 */
+	trajectoryHelpUsed: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +112,23 @@ export interface PlayerAimingPayload {
 
 export type AimUpdateEnvelope = Envelope<AimUpdatePayload>;
 export type PlayerAimingEnvelope = Envelope<PlayerAimingPayload>;
+
+// ---------------------------------------------------------------------------
+// TrajectoryHelpUpdate / PlayerTrajectoryHelp (live per-player on/off status
+// broadcast, not turn-gated — mirrors AimUpdate/PlayerAiming)
+// ---------------------------------------------------------------------------
+
+export interface TrajectoryHelpUpdatePayload {
+	enabled: boolean;
+}
+
+export interface PlayerTrajectoryHelpPayload {
+	playerId: string;
+	enabled: boolean;
+}
+
+export type TrajectoryHelpUpdateEnvelope = Envelope<TrajectoryHelpUpdatePayload>;
+export type PlayerTrajectoryHelpEnvelope = Envelope<PlayerTrajectoryHelpPayload>;
 
 // ---------------------------------------------------------------------------
 // ShotResolved (server -> client)

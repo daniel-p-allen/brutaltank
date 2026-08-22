@@ -138,6 +138,7 @@ public final class BrutalTankServer {
                 case "ShopContinue" -> handleShopContinue(session);
                 case "DevSetWind" -> handleDevSetWind(session, mapper.treeToValue(payloadNode, Payloads.DevSetWind.class));
                 case "AimUpdate" -> handleAimUpdate(session, payloadNode);
+                case "TrajectoryHelpUpdate" -> handleTrajectoryHelpUpdate(session, payloadNode);
                 default -> LOG.fine("Ignoring unhandled message type: " + envelope.type);
             }
         } catch (Exception e) {
@@ -165,7 +166,8 @@ public final class BrutalTankServer {
             return;
         }
 
-        Match.FireOutcome outcome = match.fire(session.playerId, envelope.requestId, fire.weaponId, fire.angleDeg, fire.power);
+        Match.FireOutcome outcome = match.fire(session.playerId, envelope.requestId, fire.weaponId, fire.angleDeg,
+                fire.power, fire.trajectoryHelpUsed);
         if (!outcome.accepted()) {
             Envelopes.send(sink, mapper, "FireRejected", envelope.requestId,
                     new Payloads.FireRejected(outcome.rejectReason()));
@@ -234,6 +236,18 @@ public final class BrutalTankServer {
         }
         Payloads.AimUpdate aimUpdate = mapper.treeToValue(payloadNode, Payloads.AimUpdate.class);
         match.updateAim(session.playerId, aimUpdate.angleDeg);
+    }
+
+    private void handleTrajectoryHelpUpdate(PlayerSession session, JsonNode payloadNode) throws Exception {
+        if (session.currentMatchId == null || session.playerId == null) {
+            return;
+        }
+        Match match = matchRegistry.get(session.currentMatchId);
+        if (match == null) {
+            return;
+        }
+        Payloads.TrajectoryHelpUpdate update = mapper.treeToValue(payloadNode, Payloads.TrajectoryHelpUpdate.class);
+        match.updateTrajectoryHelp(session.playerId, update.enabled);
     }
 
     private static String shopRejectionMessage(String reason) {
