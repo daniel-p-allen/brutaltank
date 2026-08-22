@@ -104,8 +104,17 @@
 				inFlight && activeShot!.preShotHeights.length ? activeShot!.preShotHeights : scene.terrain.heights;
 			const playersToDraw = inFlight
 				? scene.players.map((p) => {
-						const pre = activeShot!.preShotHealth[p.playerId];
-						return pre ? { ...p, tank: { ...p.tank, health: pre.health, alive: pre.alive } } : p;
+						const preHealth = activeShot!.preShotHealth[p.playerId];
+						const preY = activeShot!.preShotTankY[p.playerId];
+						if (!preHealth && preY === undefined) return p;
+						return {
+							...p,
+							tank: {
+								...p.tank,
+								...(preHealth ? { health: preHealth.health, alive: preHealth.alive } : {}),
+								...(preY !== undefined ? { y: preY } : {})
+							}
+						};
 					})
 				: scene.players;
 

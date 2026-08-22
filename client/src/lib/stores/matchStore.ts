@@ -330,11 +330,16 @@ function createMatchStore() {
 				const payload = envelope.payload as ShotResolvedPayload;
 				let preShotHeights: number[] = [];
 				const preShotHealth: Record<string, { health: number; alive: boolean }> = {};
+				const preShotTankY: Record<string, number> = {};
 				update((state) => {
 					preShotHeights = state.terrain.heights;
 					for (const e of payload.damageEvents) {
 						const p = state.players.find((pl) => pl.playerId === e.playerId);
 						if (p) preShotHealth[e.playerId] = { health: p.tank.health, alive: p.tank.alive };
+					}
+					for (const f of payload.tankFalls ?? []) {
+						const p = state.players.find((pl) => pl.playerId === f.playerId);
+						if (p) preShotTankY[f.playerId] = p.tank.y;
 					}
 					return applyShotResolved(state, payload);
 				});
@@ -345,7 +350,8 @@ function createMatchStore() {
 					impact: payload.impact,
 					impacts: payload.allImpacts,
 					preShotHeights,
-					preShotHealth
+					preShotHealth,
+					preShotTankY
 				});
 				return;
 			}

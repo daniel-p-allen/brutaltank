@@ -36,6 +36,15 @@ export interface PendingShotAnimation {
 	 */
 	preShotHeights: number[];
 	preShotHealth: Record<string, { health: number; alive: boolean }>;
+	/**
+	 * Per-player tank y position exactly as it was before this shot's
+	 * terrain-collapse tank-fall delta was applied, same rationale as
+	 * preShotHeights/preShotHealth — without this a tank whose ground gave
+	 * way snapped to its fallen position the instant ShotResolved arrived,
+	 * visibly dropping before the projectile animation had even reached
+	 * impact.
+	 */
+	preShotTankY: Record<string, number>;
 }
 
 export const pendingShotAnimation = writable<PendingShotAnimation | null>(null);

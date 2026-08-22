@@ -302,8 +302,25 @@ public final class ProjectileSim {
             }
 
             if (inPenetration) {
-                // Tunneling: keep integrating "underground" (no further terrain/tank
-                // checks) until cumulative penetration depth passes the cap.
+                // Tunneling: keep integrating "underground" until cumulative
+                // penetration depth passes the cap. Still check for a tank
+                // hit each step (a tank whose own ground gave way can end up
+                // sitting inside the tunnel's depth range) — previously this
+                // branch skipped the tank check entirely, letting a
+                // tunneling shot (Digger/Tunneling Shot) pass straight
+                // through a tank underground without registering a hit.
+                for (TankTarget t : targets) {
+                    double dx = x - t.x();
+                    double dy = y - t.y();
+                    if (Math.sqrt(dx * dx + dy * dy) <= TANK_HITBOX_RADIUS) {
+                        hitPlayerId = t.playerId();
+                        terminated = true;
+                        break;
+                    }
+                }
+                if (terminated) {
+                    break;
+                }
                 undergroundPath.add(new double[] {x, y});
                 if (Math.abs(y - penetrationEntryY) >= maxPenetration) {
                     terminated = true;

@@ -122,6 +122,30 @@ class ProjectileSimTest {
     }
 
     @Test
+    void tunnelingRegistersATankHitEncounteredWhileUnderground() {
+        // Regression test for a real bug (Digger/Tunneling Shot passing
+        // through a tank without registering a hit): the underground phase
+        // used to `continue` past the tank-hit check entirely once
+        // inPenetration became true.
+        Terrain terrain = flatTerrain(500);
+        ProjectileSim.Result noTarget = ProjectileSim.simulate(200, 400, 30, 60, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.TUNNELING, 1.0, 1.0, false);
+
+        assertTrue(!noTarget.undergroundPath.isEmpty(), "expected a non-empty underground path to place a target on");
+        double[] midTunnelPoint = noTarget.undergroundPath.get(noTarget.undergroundPath.size() / 2);
+
+        List<ProjectileSim.TankTarget> targets = List.of(
+                new ProjectileSim.TankTarget("p-2", midTunnelPoint[0], midTunnelPoint[1]));
+
+        Terrain tunnelTerrainWithTarget = flatTerrain(500);
+        ProjectileSim.Result result = ProjectileSim.simulate(200, 400, 30, 60, 0, tunnelTerrainWithTarget,
+                targets, com.brutaltank.domain.weapon.WeaponDef.Behavior.TUNNELING, 1.0, 1.0, false);
+
+        assertEquals("p-2", result.hitPlayerId,
+                "a tank sitting in the underground tunnel path should register a hit, not be passed through");
+    }
+
+    @Test
     void bouncingFlatTierReachesFiveBounces() {
         // Redesigned mechanic (per user feedback: "it will always bounce...
         // between 3 and 5 bounces depending on angle"): a flat/skimming
