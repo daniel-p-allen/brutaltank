@@ -267,6 +267,21 @@ function ricochet(c: AudioContext): void {
 	noiseBurst(c, { duration: 0.1, startFreq: 4000, endFreq: 600, gain: 0.5, filterType: 'lowpass' });
 }
 
+// Round-win fanfare (per user request, 2026-08-23: "a little bit of music"
+// alongside the 5s WINNER flash) — a short ascending major-triad arpeggio
+// (C5-E5-G5-C6) plus a bright final chord, synthesized rather than sourced
+// since it's a UI/celebration cue, not a weapon sound (same policy as every
+// other sound in this file — see PLAN.md section 7.3).
+function roundWinFanfare(c: AudioContext): void {
+	const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+	notes.forEach((freq, i) => {
+		tone(c, { duration: 0.5, startFreq: freq, endFreq: freq, gain: 0.35, type: 'triangle', delay: i * 0.12 });
+	});
+	// Bright final chord under the last note for a "landed" finish.
+	tone(c, { duration: 0.6, startFreq: 1046.5, endFreq: 1046.5, gain: 0.25, type: 'sine', delay: notes.length * 0.12 });
+	tone(c, { duration: 0.6, startFreq: 1318.5, endFreq: 1318.5, gain: 0.2, type: 'sine', delay: notes.length * 0.12 });
+}
+
 /** Fades an <audio> element's volume to 0 over fadeMs, then pauses/resets it. */
 function fadeOutAndStop(el: HTMLAudioElement, fadeMs: number, fromVolume: number): void {
 	const steps = 10;
@@ -381,4 +396,10 @@ export function playImpacts(weaponId: string, impactCount: number): void {
 export function playRicochet(): void {
 	if (muted || audioCtx === null) return;
 	ricochet(audioCtx);
+}
+
+/** Called once when a round's winner is announced (MatchScreen's WINNER flash, per user request 2026-08-23). */
+export function playRoundWin(): void {
+	if (muted || audioCtx === null) return;
+	roundWinFanfare(audioCtx);
 }

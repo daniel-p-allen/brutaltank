@@ -12,6 +12,7 @@
 	import ShopOverlay from './shop/ShopOverlay.svelte';
 	import { matchStore } from '../stores/matchStore';
 	import { sessionStore } from '../stores/sessionStore';
+	import { playRoundWin } from '../audio/soundManager';
 
 	// Turn timer: recomputed once a second from turnStartedAtMs/turnTimeoutSec
 	// rather than stored reactively, since it's purely a display concern.
@@ -33,6 +34,40 @@
 
 	$: activePlayerIsYou =
 		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
+
+	// Players list sorted highest-cash-first (per user request, 2026-08-23:
+	// "a really good visual way to show our running totals") so the current
+	// leader is always immediately visible at a glance rather than reading
+	// left-to-right in fixed turn order.
+	$: rankedPlayers = [...$matchStore.players].sort((a, b) => b.cash - a.cash);
+	$: maxCash = Math.max(1, ...$matchStore.players.map((p) => p.cash));
+
+	function playerColor(playerId: string | null): string {
+		if (!playerId) return '#fff';
+		return $matchStore.players.find((p) => p.playerId === playerId)?.color ?? '#fff';
+	}
+
+	// WINNER flash + fanfare (per user request, 2026-08-23: "WINNNER!! FLASHES
+	// FOR 5 SECONDS WITH A LITTLE BIT OF MUSIC") — fires once per RoundEnded,
+	// on the null -> non-null transition, not on every reactive re-render
+	// (roundEndedInfo stays non-null for the whole shop/next-round window, far
+	// longer than the 5s flash should last).
+	let winnerFlashing = false;
+	let flashTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastRoundEndedInfo: typeof $matchStore.roundEndedInfo = null;
+	$: {
+		const info = $matchStore.roundEndedInfo;
+		if (info !== null && lastRoundEndedInfo === null && info.winnerPlayerId) {
+			winnerFlashing = true;
+			playRoundWin();
+			if (flashTimer !== null) clearTimeout(flashTimer);
+			flashTimer = setTimeout(() => (winnerFlashing = false), 5000);
+		}
+		lastRoundEndedInfo = info;
+	}
+	onDestroy(() => {
+		if (flashTimer !== null) clearTimeout(flashTimer);
+	});
 </script>
 
 <div class="match-screen">
@@ -61,33 +96,55 @@
 		{/if}
 
 		<div class="players">
-			{#each $matchStore.players as player (player.playerId)}
-				<span class="player" style="color: {player.color}">
-					{player.displayName}: {player.tank.health} hp{player.tank.alive ? '' : ' (destroyed)'}
-					<span class="player-cash">${player.cash}</span>
-					<span
-						class="trajectory-help-badge"
-						class:on={$matchStore.remoteTrajectoryHelp[player.playerId]}
-					>
-						help: {$matchStore.remoteTrajectoryHelp[player.playerId] ? 'on' : 'off'}
-					</span>
-					{#if $matchStore.disconnectedPlayerIds.includes(player.playerId)}
-						<span class="disconnected-badge">disconnected</span>
-					{/if}
-				</span>
+			{#each rankedPlayers as player, rank (player.playerId)}
+				<div
+					class="player-card"
+					class:leader={rank === 0 && player.cash > 0}
+					style="--player-color: {player.color}"
+				>
+					<div class="player-card-header">
+						<span class="player-name">{player.displayName}</span>
+						{#if $matchStore.disconnectedPlayerIds.includes(player.playerId)}
+							<span class="disconnected-badge">disconnected</span>
+						{/if}
+					</div>
+					<div class="player-stat-row">
+						<span class="stat-label">HP</span>
+						<span class="stat-value">{player.tank.health}{player.tank.alive ? '' : ' (destroyed)'}</span>
+					</div>
+					<div class="player-stat-row">
+						<span class="stat-label">Cash</span>
+						<span class="stat-value">${player.cash}</span>
+					</div>
+					<!-- Running-totals bar: width relative to the current match leader's
+					     cash, so relative standing is visible at a glance without reading
+					     every number (per user request, 2026-08-23). -->
+					<div class="cash-bar-track">
+						<div class="cash-bar-fill" style="width: {(player.cash / maxCash) * 100}%" />
+					</div>
+					<div class="player-stat-row">
+						<span class="stat-label">Help</span>
+						<span class="stat-value trajectory-help-badge" class:on={$matchStore.remoteTrajectoryHelp[player.playerId]}>
+							{$matchStore.remoteTrajectoryHelp[player.playerId] ? 'on' : 'off'}
+						</span>
+					</div>
+				</div>
 			{/each}
 		</div>
 
 		{#if $matchStore.roundEndedInfo}
 			<div class="round-end-overlay">
-				<h3>Round Complete</h3>
-				<p>
-					{#if $matchStore.roundEndedInfo.winnerPlayerId}
-						Winner: {playerName($matchStore.roundEndedInfo.winnerPlayerId)}
-					{:else}
-						Draw (safety cap reached)
-					{/if}
-				</p>
+				{#if $matchStore.roundEndedInfo.winnerPlayerId}
+					<h2
+						class="winner-banner"
+						class:flashing={winnerFlashing}
+						style="--winner-color: {playerColor($matchStore.roundEndedInfo.winnerPlayerId)}"
+					>
+						WINNER!! {playerName($matchStore.roundEndedInfo.winnerPlayerId)}
+					</h2>
+				{:else}
+					<h3>Draw (safety cap reached)</h3>
+				{/if}
 				<ul>
 					{#each $matchStore.roundEndedInfo.standings as standing (standing.playerId)}
 						<li>{playerName(standing.playerId)}: ${standing.cash}</li>
@@ -155,25 +212,82 @@
 
 	.players {
 		display: flex;
-		gap: 1rem;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		font-family: system-ui, sans-serif;
+	}
+
+	/* One consolidated card per player (name/HP/cash/help together, per user
+	   request 2026-08-23 — previously spread across separate inline spans) —
+	   all-same-color per player so at a glance every stat is legible as
+	   belonging to one player, via --player-color driving both the border
+	   and every accent inside. */
+	.player-card {
+		--player-color: #fff;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-width: 9.5rem;
+		padding: 0.5rem 0.65rem;
+		border-radius: 8px;
+		border: 1.5px solid var(--player-color);
+		background: color-mix(in srgb, var(--player-color) 10%, transparent);
+	}
+
+	.player-card.leader {
+		box-shadow: 0 0 0 1px var(--player-color), 0 0 10px 1px color-mix(in srgb, var(--player-color) 60%, transparent);
+	}
+
+	.player-card-header {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.4rem;
+	}
+
+	.player-name {
+		font-weight: 700;
+		color: var(--player-color);
+	}
+
+	.player-stat-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.5rem;
 		font-family: monospace;
-		font-size: 0.9rem;
+		font-size: 0.85rem;
+	}
+
+	.stat-label {
+		color: #888;
+	}
+
+	.stat-value {
+		color: var(--player-color);
 	}
 
 	.disconnected-badge {
-		margin-left: 0.25rem;
-		font-size: 0.7rem;
+		font-size: 0.65rem;
 		color: #e0a020;
 	}
 
-	.player-cash {
-		margin-left: 0.4rem;
-		color: #7fd9a0;
+	/* Running-totals bar: fill width is set inline per-player (relative to
+	   the match leader's cash), per user request 2026-08-23. */
+	.cash-bar-track {
+		height: 4px;
+		border-radius: 2px;
+		background: rgba(255, 255, 255, 0.08);
+		overflow: hidden;
+	}
+
+	.cash-bar-fill {
+		height: 100%;
+		background: var(--player-color);
+		border-radius: 2px;
+		transition: width 0.3s ease-out;
 	}
 
 	.trajectory-help-badge {
-		margin-left: 0.4rem;
-		font-size: 0.75rem;
 		color: #666;
 	}
 
@@ -192,6 +306,35 @@
 	.round-end-overlay ul {
 		margin: 0.25rem 0;
 		padding-left: 1.25rem;
+	}
+
+	/* WINNER!! flash + fanfare (per user request, 2026-08-23) — pulses for
+	   5 seconds (JS removes the .flashing class via setTimeout), then settles
+	   to a plain static heading so the round-end card doesn't keep animating
+	   for the whole shop/next-round window. */
+	.winner-banner {
+		margin: 0 0 0.4rem;
+		text-align: center;
+		font-size: 1.6rem;
+		letter-spacing: 0.04em;
+		color: var(--winner-color, #fff);
+		text-shadow: 0 0 8px color-mix(in srgb, var(--winner-color, #fff) 70%, transparent);
+	}
+
+	.winner-banner.flashing {
+		animation: winner-pulse 0.5s ease-in-out infinite;
+	}
+
+	@keyframes winner-pulse {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.55;
+			transform: scale(1.06);
+		}
 	}
 
 	.next-round-note {

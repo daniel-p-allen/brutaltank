@@ -129,6 +129,16 @@ cash was never live-updated from `ShotResolved.cashEarned` client-side
 `PlayerAiming`), so `MatchScreen.svelte`'s players list can show every
 player's live cash and Trajectory Help on/off status, per user request.
 
+**Player-card redesign + round-end WINNER!! flash, same session
+(2026-08-23):** the plain-text players row became one bordered card per
+player (`.player-card`, color-driven by `--player-color` so name/HP/cash/
+help all read as one player's stats at a glance), sorted highest-cash-first,
+each with a `cash-bar-fill` bar showing cash relative to the match leader
+(a direct visualization of the already-cumulative running total). Round end
+now flashes a `WINNER!!` heading in the winner's color for exactly 5s
+(`winner-pulse` CSS animation + `setTimeout`) with a new synthesized victory
+fanfare (`soundManager.ts`'s `playRoundWin`).
+
 ## Where the weapon/shield research and design work lives
 
 This project has accumulated substantial **design research** (real-world +
