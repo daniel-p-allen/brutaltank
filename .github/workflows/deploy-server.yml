@@ -31,7 +31,7 @@ jobs:
               cd server
 
               Write-Output "STEP: stop old server process"
-              Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*com.brutaltank.net.BrutalTankServer*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+              Get-NetTCPConnection -LocalPort 6154 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 
               Write-Output "STEP: gradlew installDist"
               .\gradlew.bat installDist --no-daemon
