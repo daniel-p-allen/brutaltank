@@ -2,7 +2,7 @@ name: Deploy server
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "server/**"
       - ".github/workflows/deploy-server.yml"
