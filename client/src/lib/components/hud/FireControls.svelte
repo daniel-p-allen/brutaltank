@@ -82,7 +82,14 @@
 
 	<label class="control">
 		<span>Power: {$aimStore.power}</span>
-		<input type="range" min="0" max="100" step="1" bind:value={$aimStore.power} />
+		<input
+			class="power-slider"
+			type="range"
+			min="0"
+			max="100"
+			step="1"
+			bind:value={$aimStore.power}
+		/>
 	</label>
 
 	<button
@@ -134,6 +141,83 @@
 	   sweep direction must match. */
 	.angle-slider {
 		direction: rtl;
+	}
+
+	/* Angle and Power are the primary aiming controls (per user feedback,
+	   2026-08-24: "these are the main tools") -- sized and colored to stand
+	   out from the rest of the HUD's smaller buttons rather than blend in as
+	   plain browser-default range inputs. Angle gets blue (matches the
+	   existing "you"/local-player accent used elsewhere in the app);
+	   Power gets amber (an otherwise-unused hue in this UI, reading as
+	   "energy" without colliding with cash-green or fire-red). Thumb/track
+	   styling needs both -webkit- and -moz- prefixed pseudo-elements --
+	   there's no unprefixed standard for range input styling yet. */
+	.angle-slider,
+	.power-slider {
+		width: 11rem;
+		height: 1.5rem;
+		margin: 0;
+		background: transparent;
+		cursor: pointer;
+		appearance: none;
+		-webkit-appearance: none;
+	}
+
+	.angle-slider::-webkit-slider-runnable-track,
+	.power-slider::-webkit-slider-runnable-track {
+		height: 0.7rem;
+		border-radius: 999px;
+	}
+
+	.angle-slider::-moz-range-track,
+	.power-slider::-moz-range-track {
+		height: 0.7rem;
+		border-radius: 999px;
+	}
+
+	.angle-slider::-webkit-slider-thumb,
+	.power-slider::-webkit-slider-thumb {
+		appearance: none;
+		-webkit-appearance: none;
+		width: 1.7rem;
+		height: 1.7rem;
+		margin-top: -0.5rem;
+		border-radius: 50%;
+		border: 3px solid #111;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+		cursor: pointer;
+	}
+
+	.angle-slider::-moz-range-thumb,
+	.power-slider::-moz-range-thumb {
+		width: 1.7rem;
+		height: 1.7rem;
+		border-radius: 50%;
+		border: 3px solid #111;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+		cursor: pointer;
+	}
+
+	.angle-slider::-webkit-slider-runnable-track {
+		background: #244266;
+	}
+	.angle-slider::-moz-range-track {
+		background: #244266;
+	}
+	.angle-slider::-webkit-slider-thumb,
+	.angle-slider::-moz-range-thumb {
+		background: #5b9bf0;
+	}
+
+	.power-slider::-webkit-slider-runnable-track {
+		background: #5c4416;
+	}
+	.power-slider::-moz-range-track {
+		background: #5c4416;
+	}
+	.power-slider::-webkit-slider-thumb,
+	.power-slider::-moz-range-thumb {
+		background: #f0b23c;
 	}
 
 	.trajectory-help-button {

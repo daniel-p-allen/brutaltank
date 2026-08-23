@@ -13,6 +13,16 @@
 
 	const LABEL_BY_ID = new Map(WEAPON_CATALOG.map((w) => [w.id, w.label]));
 
+	// Two-word "what it does" blurb shown under each shield's name in the
+	// shop (per user feedback, 2026-08-24: shields need to stand out and say
+	// what they do at a glance). Sourced from ShieldDef.java's own doc
+	// comments -- keep in sync if those mechanics change.
+	const SHIELD_BLURB_BY_ID: Record<string, string> = {
+		absorb_shield: 'Halves damage',
+		deflect_shield: 'Blocks once',
+		reflect_shield: 'Refunds cash'
+	};
+
 	let now = Date.now();
 	const tickInterval = setInterval(() => (now = Date.now()), 250);
 	onDestroy(() => clearInterval(tickInterval));
@@ -67,11 +77,16 @@
 			</div>
 		</div>
 
-		<div class="section">
+		<div class="section shields-section">
 			<h4>Shields</h4>
 			<div class="grid">
 				{#each shields as entry (entry.itemId)}
-					<ShopItemCard {entry} label={LABEL_BY_ID.get(entry.itemId) ?? entry.itemId} cash={localPlayer?.cash ?? 0} />
+					<ShopItemCard
+						{entry}
+						label={LABEL_BY_ID.get(entry.itemId) ?? entry.itemId}
+						description={SHIELD_BLURB_BY_ID[entry.itemId]}
+						cash={localPlayer?.cash ?? 0}
+					/>
 				{/each}
 			</div>
 		</div>
@@ -139,6 +154,15 @@
 		color: #aaa;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	/* Shields get their own accent (violet, unused elsewhere in this UI) so
+	   they read as a distinct category at a glance, not just a second list
+	   under the same heading style as Weapons -- per user feedback,
+	   2026-08-24. */
+	.shields-section h4 {
+		color: #a06fe0;
+		font-weight: 700;
 	}
 
 	.grid {

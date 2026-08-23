@@ -10,6 +10,9 @@
 	export let entry: PriceListEntry;
 	export let label: string;
 	export let cash: number;
+	// Two-word "what it does" blurb, shields only (ShopOverlay's
+	// SHIELD_BLURB_BY_ID) -- weapons pass nothing.
+	export let description: string | undefined = undefined;
 
 	let quantity = 1;
 
@@ -29,6 +32,9 @@
 		<span class="label">{label}</span>
 		<span class="price">${entry.price}</span>
 	</div>
+	{#if description}
+		<div class="blurb">{description}</div>
+	{/if}
 	<div class="stock">{outOfStock ? 'Out of stock' : `${entry.stock} left`}</div>
 	<div class="controls">
 		<input
@@ -56,12 +62,28 @@
 		min-width: 9rem;
 	}
 
+	/* Violet accent (unused elsewhere in this UI) makes shields read as a
+	   distinct category at a glance rather than blending into the weapon
+	   list with just a border-style difference -- per user feedback,
+	   2026-08-24 ("make them a bit more obvious"), design approved via the
+	   shop mockup example first. */
 	.card.shield {
-		border-style: dashed;
+		border-color: #a06fe0;
+		background: rgba(160, 111, 224, 0.1);
+	}
+
+	.card.shield .controls button:not(:disabled) {
+		background: #a06fe0;
 	}
 
 	.card.out-of-stock {
 		opacity: 0.5;
+	}
+
+	.blurb {
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: #a06fe0;
 	}
 
 	.header {
