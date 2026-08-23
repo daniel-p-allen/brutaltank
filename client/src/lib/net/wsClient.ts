@@ -20,7 +20,7 @@ export type ConnectionState =
 export type MessageHandler = (data: string) => void;
 export type StateHandler = (state: ConnectionState) => void;
 
-const DEFAULT_URL = 'ws://localhost:8080/ws';
+const DEFAULT_URL: string = import.meta.env.VITE_SERVER_URL ?? 'ws://localhost:6154/ws';
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8000;
 

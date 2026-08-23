@@ -60,7 +60,7 @@ class BrutalTankServerTest {
         TestClient() throws Exception {
             HttpClient httpClient = HttpClient.newHttpClient();
             this.socket = httpClient.newWebSocketBuilder()
-                    .buildAsync(URI.create("ws://localhost:8080/ws"), new WebSocket.Listener() {
+                    .buildAsync(URI.create("ws://localhost:6154/ws"), new WebSocket.Listener() {
                         @Override
                         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
                             buffer.append(data);

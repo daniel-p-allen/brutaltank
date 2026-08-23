@@ -77,8 +77,8 @@ BrutalTank/
 **Build tooling**: Gradle (Kotlin DSL) for the server, Vite + Svelte + TypeScript for the client.
 
 **Local dev workflow**: two processes, no unified build at v1.
-- `server`: `./gradlew run` — Undertow listens on `:8080`, serving `/ws`.
-- `client`: `npm run dev` (Vite on `:5173`), hardcoded dev WS URL `ws://localhost:8080/ws`.
+- `server`: `./gradlew run` — Undertow listens on `:6154`, serving `/ws`.
+- `client`: `npm run dev` (Vite on `:5173`), dev WS URL defaults to `ws://localhost:6154/ws` (override via `VITE_SERVER_URL`).
 - Multiplayer playtesting: multiple browser tabs/windows against the same local server.
 - Production packaging (post-v1): a Gradle fat-jar task serves the built `client/dist` via Undertow's `ResourceHandler` so one process serves both.
 

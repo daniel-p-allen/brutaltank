@@ -32,7 +32,7 @@ import java.util.logging.Logger;
 public final class BrutalTankServer {
 
     private static final Logger LOG = Logger.getLogger(BrutalTankServer.class.getName());
-    private static final int PORT = 8080;
+    private static final int PORT = 6154;
     private static final String HOST = "0.0.0.0";
 
     private final Undertow server;

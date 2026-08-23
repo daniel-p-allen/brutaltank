@@ -2,7 +2,7 @@
 
 This document is the single hand-maintained source of truth for every WebSocket message shape exchanged between the BrutalTank client (Svelte) and server (Java/Undertow). Both the server-side DTOs (`server/src/main/java/com/brutaltank/protocol/`) and the client-side TypeScript interfaces (`client/src/lib/protocol/`) are hand-written to match this document — there is no codegen at v1. If you change a message shape, update this file first, then update both implementations to match.
 
-All messages travel as JSON **text frames** over a single WebSocket endpoint: `/ws` (server listens on `:8080`, client dev connects to `ws://localhost:8080/ws`).
+All messages travel as JSON **text frames** over a single WebSocket endpoint: `/ws` (server listens on `:6154`, client dev connects to `ws://localhost:6154/ws`).
 
 ---
 

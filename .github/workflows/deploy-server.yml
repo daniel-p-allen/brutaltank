@@ -1,0 +1,26 @@
+name: Deploy server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - ".github/workflows/deploy-server.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd ${{ secrets.VM_DEPLOY_PATH }}
+            git pull
+            cd server
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*com.brutaltank.net.BrutalTankServer*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+            .\gradlew.bat installDist --no-daemon
+            Start-Process -FilePath ".\build\install\brutaltank-server\bin\brutaltank-server.bat" -WindowStyle Hidden

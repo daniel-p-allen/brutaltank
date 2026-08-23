@@ -32,14 +32,14 @@ Client and server are two independently-buildable modules connected only by the 
 
 Run two processes side by side. There is no unified build yet.
 
-### 1. Server (Undertow on `:8080`)
+### 1. Server (Undertow on `:6154`)
 
 ```
 cd server
 ./gradlew run
 ```
 
-This starts the WebSocket server, serving the single endpoint `/ws` on port `8080`.
+This starts the WebSocket server, serving the single endpoint `/ws` on port `6154`.
 
 ### 2. Client (Vite on `:5173`)
 
@@ -49,7 +49,7 @@ npm install
 npm run dev
 ```
 
-This starts the Vite dev server on port `5173`. The client's dev WebSocket URL is hardcoded to `ws://localhost:8080/ws`, so the server above must already be running.
+This starts the Vite dev server on port `5173`. The client's dev WebSocket URL defaults to `ws://localhost:6154/ws` (override with the `VITE_SERVER_URL` env var), so the server above must already be running.
 
 ### Multiplayer playtesting
 
