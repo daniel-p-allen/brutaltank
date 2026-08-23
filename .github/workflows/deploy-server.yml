@@ -18,9 +18,17 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
+            $ErrorActionPreference = 'Continue'
+            Write-Output "STEP: cd deploy path"
             cd ${{ secrets.VM_DEPLOY_PATH }}
+            Write-Output "STEP: git pull"
             git pull
+            Write-Output "STEP: cd server"
             cd server
+            Write-Output "STEP: stop old server process"
             Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*com.brutaltank.net.BrutalTankServer*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+            Write-Output "STEP: gradlew installDist"
             .\gradlew.bat installDist --no-daemon
+            Write-Output "STEP: start server"
             Start-Process -FilePath ".\build\install\brutaltank-server\bin\brutaltank-server.bat" -WindowStyle Hidden
+            Write-Output "STEP: done"
