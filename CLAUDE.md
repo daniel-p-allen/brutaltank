@@ -229,6 +229,19 @@ UI work this session, all shipped:
 
 Also filed, not yet fixed: MIRV split-animation client rendering bug
 (children render as straight-line lerps from the split point rather than
-continuing an arc — see `PLAN.md` Future Ideas) and a CloseWait
+continuing an arc — see `PLAN.md` Future Ideas), a CloseWait
 connection-leak in `BrutalTankServer.java` (no ping/pong keepalive or
-idle-timeout reaping, observed live on the deployed server).
+idle-timeout reaping, observed live on the deployed server), and a
+killing-shot-skips-its-own-animation bug (round ends before the client's
+flight/explosion animation for the fatal shot has played — `Match.java`
+broadcasts `RoundEnded`+opens the shop synchronously right after
+`ShotResolved` for the same shot; needs a client-side deferral, same
+category as the two 2026-08-23 tank-falls-before-shot-lands fixes).
+
+**2s round-end splash added** (`MatchScreen.svelte`'s `.round-end-splash`,
+`splashShowing` state) — per user request ("even if it is a splash screen
+for two seconds"), since the shop currently opens immediately server-side
+with zero transition. Purely a client-side visual gate over the whole
+match screen for 2s on `RoundEnded`, not a server-side timing change —
+the shop underneath is already open/interactive the moment the splash
+starts, this only delays it being *visible*.
