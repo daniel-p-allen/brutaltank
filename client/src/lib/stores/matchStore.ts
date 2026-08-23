@@ -53,8 +53,7 @@ import type {
 	Terrain,
 	TurnForfeitedPayload,
 	TurnStartedPayload,
-	Wind,
-	WindOverriddenPayload
+	Wind
 } from '../protocol/types';
 import { queueShotAnimation } from './shotAnimationStore';
 
@@ -239,13 +238,6 @@ export function applyTurnStarted(state: MatchState, payload: TurnStartedPayload)
 	};
 }
 
-// TEMPORARY DEBUG-ONLY (per user request, 2026-08-22) — remove alongside
-// DevSetWind/WindOverridden's other pieces once manual verification is done.
-/** Pure helper (exported for unit testing): patches wind from a dev-only WindOverridden broadcast. */
-export function applyWindOverridden(state: MatchState, payload: WindOverriddenPayload): MatchState {
-	return { ...state, wind: { ...payload.wind } };
-}
-
 /** Pure helper (exported for unit testing). */
 export function applyFireRejected(state: MatchState, payload: FireRejectedPayload): MatchState {
 	return { ...state, fireRejectedReason: payload.reason, awaitingShotResolution: false };
@@ -394,10 +386,6 @@ function createMatchStore() {
 
 			case 'TurnStarted':
 				update((state) => applyTurnStarted(state, envelope.payload as TurnStartedPayload));
-				return;
-
-			case 'WindOverridden': // TEMPORARY DEBUG-ONLY, see applyWindOverridden's comment
-				update((state) => applyWindOverridden(state, envelope.payload as WindOverriddenPayload));
 				return;
 
 			case 'FireRejected':

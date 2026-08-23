@@ -30,17 +30,6 @@ export interface Wind {
 	directionSign: number;
 }
 
-// TEMPORARY DEBUG-ONLY (per user request, 2026-08-22 — manual wind-direction
-// verification). Remove alongside the server-side DevSetWind handler and the
-// slider in FireControls.svelte once done.
-export interface DevSetWindPayload {
-	strength: number;
-}
-
-export interface WindOverriddenPayload {
-	wind: Wind;
-}
-
 export interface Tank {
 	x: number;
 	y: number;

@@ -22,19 +22,7 @@
 	import { trajectoryHelpStore } from '../../stores/trajectoryHelpStore';
 	import { hasAmmo } from '../../stores/weaponSelectStore';
 	import { weaponSelectStore } from '../../stores/weaponSelectStore';
-	import { sendDevSetWind } from '../../game/input/devInput';
 	import WeaponSelect from './WeaponSelect.svelte';
-
-	// TEMPORARY DEBUG-ONLY (per user request, 2026-08-22: "put a temporary
-	// 3rd slider in... so i can zero the wind and check everything") — lets
-	// the wind be manually overridden for testing. Remove this slider,
-	// devWindValue, devInput.ts, and the matching server/protocol pieces
-	// (Payloads.DevSetWind/WindOverridden, Match.devSetWind) once manual
-	// wind-direction verification is done.
-	let devWindValue = 0;
-	function onDevWindInput(): void {
-		sendDevSetWind(devWindValue);
-	}
 
 	$: isMyTurn =
 		$matchStore.activePlayerId !== null && $matchStore.activePlayerId === $sessionStore.playerId;
@@ -97,18 +85,6 @@
 		<input type="range" min="0" max="100" step="1" bind:value={$aimStore.power} />
 	</label>
 
-	<label class="control dev-wind-control">
-		<span>DEBUG Wind: {devWindValue}</span>
-		<input
-			type="range"
-			min="-10"
-			max="10"
-			step="1"
-			bind:value={devWindValue}
-			on:input={onDevWindInput}
-		/>
-	</label>
-
 	<button
 		type="button"
 		class="trajectory-help-button"
@@ -158,11 +134,6 @@
 	   sweep direction must match. */
 	.angle-slider {
 		direction: rtl;
-	}
-
-	/* TEMPORARY DEBUG-ONLY — remove alongside the slider markup above. */
-	.dev-wind-control span {
-		color: #e0a020;
 	}
 
 	.trajectory-help-button {

@@ -1612,18 +1612,6 @@ public final class Match {
         this.windDirectionSign = strength >= 0 ? 1 : -1;
     }
 
-    /**
-     * TEMPORARY DEBUG-ONLY (see {@link com.brutaltank.protocol.Payloads.DevSetWind}):
-     * same effect as {@link #debugSetWind}, but broadcasts the change live so
-     * a connected client's manual test (e.g. zeroing wind to check direction)
-     * takes effect immediately without waiting for the next natural re-roll.
-     */
-    public synchronized void devSetWind(int strength) {
-        this.windStrength = strength;
-        this.windDirectionSign = strength >= 0 ? 1 : -1;
-        broadcast("WindOverridden", new Payloads.WindOverridden(new Payloads.WindDto(windStrength, windDirectionSign)));
-    }
-
     /** Test-only hook: repositions a tank without going through terrain-derived spawn logic. */
     synchronized void debugSetTankPosition(String playerId, double x, double y) {
         MatchPlayer mp = players.get(playerId);

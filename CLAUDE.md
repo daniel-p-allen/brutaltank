@@ -57,12 +57,12 @@ border, whole UI framed as one piece) plus the heading doubling as a live
 
 Later the same session: **wind now scales with weapon weight**
 (`ProjectileSim.windAccel` divided by `gravityMultiplier` — heavy weapons
-are pushed less, light ones more, per user feedback), plus a **temporary
-debug-only wind-override slider** (`DevSetWind`/`WindOverridden`, an orange
-"DEBUG Wind" slider in `FireControls.svelte`) added specifically to
-manually verify the wind-direction fix below — **every piece of it is
-commented "TEMPORARY DEBUG-ONLY" and should be stripped out** once that
-verification is done; see its `PLAN.md` Future Ideas entry.
+are pushed less, light ones more, per user feedback). A temporary
+debug-only wind-override slider (`DevSetWind`/`WindOverridden`, an orange
+"DEBUG Wind" slider in `FireControls.svelte`) was added the same session to
+manually verify the wind-direction fix below, then **removed entirely on
+2026-08-23** once that verification was confirmed done; see its `PLAN.md`
+Future Ideas entry.
 
 **Four real bugs found and fixed this session, worth knowing about:**
 1. **Shield graphics silently never rendered.** The client only ever learned

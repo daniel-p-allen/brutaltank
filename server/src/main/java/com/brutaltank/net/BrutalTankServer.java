@@ -136,7 +136,6 @@ public final class BrutalTankServer {
                 case "Fire" -> handleFire(session, sink, envelope, payloadNode);
                 case "ShopPurchase" -> handleShopPurchase(session, sink, envelope, payloadNode);
                 case "ShopContinue" -> handleShopContinue(session);
-                case "DevSetWind" -> handleDevSetWind(session, mapper.treeToValue(payloadNode, Payloads.DevSetWind.class));
                 case "AimUpdate" -> handleAimUpdate(session, payloadNode);
                 case "TrajectoryHelpUpdate" -> handleTrajectoryHelpUpdate(session, payloadNode);
                 default -> LOG.fine("Ignoring unhandled message type: " + envelope.type);
@@ -174,20 +173,6 @@ public final class BrutalTankServer {
         }
         // On success, Match.fire() has already broadcast ShotResolved (and any
         // round/match transition messages) to every connected player itself.
-    }
-
-    // TEMPORARY DEBUG-ONLY (see Payloads.DevSetWind's doc comment) — remove
-    // this handler along with the message once manual wind-direction
-    // verification is done.
-    private void handleDevSetWind(PlayerSession session, Payloads.DevSetWind devSetWind) {
-        if (session.currentMatchId == null) {
-            return;
-        }
-        Match match = matchRegistry.get(session.currentMatchId);
-        if (match == null) {
-            return;
-        }
-        match.devSetWind(devSetWind.strength);
     }
 
     private void handleShopContinue(PlayerSession session) {
