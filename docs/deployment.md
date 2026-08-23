@@ -29,40 +29,50 @@
   SSHes into the VM (PowerShell as the remote shell) and runs
   `git pull`, rebuilds (`gradlew.bat installDist`), stops whatever's
   listening on port 6154 (`Get-NetTCPConnection` + `Stop-Process` — not
-  `Get-CimInstance`, see below), and starts the freshly-built one
-  detached via `Start-Process -WindowStyle Hidden`.
+  `Get-CimInstance`, see below), and starts the freshly-built one via a
+  **Scheduled Task** (not `Start-Process` — see "Fixed bug" below).
 
-## Known open bug: deployed server doesn't stay running
+## Fixed bug: deployed server didn't stay running (fixed 2026-08-24)
 
-The deploy workflow reports success (build succeeds, `Start-Process`
-runs with no error) but the server was found **not actually running**
-shortly after — `Get-NetTCPConnection -LocalPort 6154` on the VM came
-back empty. Manually running `.\gradlew.bat run` in a foreground
-PowerShell window on the VM starts it fine and it stays up (confirmed
-2026-08-24) — so the server code itself is not the problem. Suspect the
-`Start-Process -WindowStyle Hidden`-launched process is getting killed
-somehow once the SSH session that spawned it closes (a detached-process/
-job-object lifetime issue is the common cause of this on Windows SSH
-setups), but this is **not yet root-caused or fixed** — worth
-investigating next session before relying on the automated pipeline
-for real matches. Workaround for now: after a deploy, manually SSH in
-and confirm with `Get-NetTCPConnection -LocalPort 6154`; if empty,
-start it manually.
+The deploy workflow used to report success but the server wasn't
+actually left running — `Get-NetTCPConnection -LocalPort 6154` on the
+VM came back empty shortly after a "successful" deploy. Root cause:
+`Start-Process -WindowStyle Hidden`-launched children get nested into
+the same Windows Job Object as the SSH session that spawned them by
+default, and sshd kills that whole job when the SSH session closes —
+so the server process died the moment the deploy step's SSH connection
+ended, even though `Start-Process` itself reported no error. Fixed by
+launching via a Scheduled Task (`schtasks /Create` + `/Run`) instead,
+which runs fully outside that job and survives the session closing —
+confirmed working: the server stayed up and had live established
+connections on port 6154 well after the deploying SSH session ended.
 
-**Manual start commands (confirmed working, 2026-08-24)** — run on the
-VM directly (RDP/console, or an interactive SSH session you keep open):
+A second, unrelated issue surfaced while root-causing this: several
+early fix attempts (quoting, routing through `cmd.exe /c`) were chasing
+a red herring — the real problem was `$ErrorActionPreference = 'Stop'`
+converting a completely benign `schtasks` stderr warning ("Task may not
+run because /ST is earlier than current time" — irrelevant, since the
+script immediately forces it with `/Run` anyway) into a terminating
+PowerShell exception, aborting the script and masking the fact the task
+creation was actually succeeding (exit code 0) the whole time. Worth
+remembering generally: when a native command's failure message doesn't
+match what the command should even be capable of failing at, suspect
+`$ErrorActionPreference = 'Stop'` masking the real (possibly successful)
+output rather than the command itself — scope it to `'Continue'` around
+just that call and log the real output/exit code before assuming the
+command itself is broken.
+
+**Manual start commands** (only needed if the automated pipeline is
+unavailable/being debugged) — run on the VM directly (RDP/console, or
+an interactive SSH session kept open):
 ```
 cd C:\Users\<redacted-user>\brutaltank\server
 .\gradlew.bat run
 ```
-This runs in the foreground of that terminal (first run downloads a
-Gradle Daemon, subsequent runs are faster) and stays up as long as the
-window/session stays open — leave it running rather than closing the
-terminal. Confirm it's listening with `Get-NetTCPConnection -LocalPort
-6154` from another window. This is a live-in-foreground workaround, not
-a permanent fix — see the bug note above for the real fix still needed
-in the automated pipeline (Scheduled-Task-based launch, so it survives
-the SSH session closing).
+This runs in the foreground of that terminal and stays up as long as
+the window/session stays open — leave it running rather than closing
+the terminal. Confirm with `Get-NetTCPConnection -LocalPort 6154` from
+another window.
 
 ## One-time manual setup (not automatable from here)
 
