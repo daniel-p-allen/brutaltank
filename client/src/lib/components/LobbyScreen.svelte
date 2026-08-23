@@ -7,15 +7,34 @@
 	import { lobbyStore } from '../stores/lobbyStore';
 	import { sessionStore } from '../stores/sessionStore';
 	import { sendSetReady } from '../net/lobbyActions';
+	import InstructionsScreen from './InstructionsScreen.svelte';
 
 	let ready = false;
+	// Per user request, 2026-08-24: clicking Ready shows the instructions
+	// screen first; SetReady isn't actually sent to the server until the
+	// player clicks Ready again there. Cancelling ready skips straight back
+	// (no need to re-read instructions just to un-ready).
+	let showInstructions = false;
 
 	function toggleReady(): void {
-		ready = !ready;
-		sendSetReady(ready);
+		if (ready) {
+			ready = false;
+			sendSetReady(false);
+			return;
+		}
+		showInstructions = true;
+	}
+
+	function confirmReadyFromInstructions(): void {
+		showInstructions = false;
+		ready = true;
+		sendSetReady(true);
 	}
 </script>
 
+{#if showInstructions}
+	<InstructionsScreen onReady={confirmReadyFromInstructions} />
+{:else}
 <div class="lobby-screen">
 	<h2>Lobby</h2>
 	{#if $lobbyStore.matchId}
@@ -42,6 +61,7 @@
 		{ready ? 'Cancel Ready' : 'Ready'}
 	</button>
 </div>
+{/if}
 
 <style>
 	.lobby-screen {

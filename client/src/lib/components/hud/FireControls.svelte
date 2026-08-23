@@ -163,6 +163,11 @@
 		-webkit-appearance: none;
 	}
 
+	/* 30% longer than angle, per user request 2026-08-24. */
+	.power-slider {
+		width: 14.3rem;
+	}
+
 	.angle-slider::-webkit-slider-runnable-track,
 	.power-slider::-webkit-slider-runnable-track {
 		height: 0.7rem;
