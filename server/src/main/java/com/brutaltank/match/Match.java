@@ -61,10 +61,12 @@ public final class Match {
     static final long DEFAULT_RECONNECT_GRACE_MS = 120_000;
     // M4 (PLAN.md 4.5: "Shop phase duration: 30s, server-enforced") — bumped
     // to 120s (per user feedback, 2026-08-22: shop "randomly" timing out was
-    // annoying) now that ShopContinue is the primary way a shop phase ends;
-    // this is purely a stall-safety fallback for an AFK-but-still-connected
-    // player, not meant to fire during normal play.
-    static final long DEFAULT_SHOP_TIMEOUT_MS = 120_000;
+    // annoying), then to 600s (per user feedback, 2026-08-24: it still fired
+    // during normal play while genuinely shopping, forcing the round to
+    // start mid-browse) now that ShopContinue is the primary way a shop
+    // phase ends; this is purely a stall-safety fallback for an
+    // AFK-but-still-connected player, not meant to fire during normal play.
+    static final long DEFAULT_SHOP_TIMEOUT_MS = 600_000;
     private static final String[] COLORS = {
             "#e33", "#33e", "#3e3", "#ee3", "#e3e", "#3ee", "#f80", "#a3f"
     };

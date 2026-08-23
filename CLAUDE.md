@@ -181,3 +181,54 @@ hierarchy, no real design system. Filed in `PLAN.md`'s Future Ideas as
 components, what the user explicitly asked for: consistent widths, rounded
 edges, genre-appropriate design research first) before starting on it.
 Not started yet.
+
+## 2026-08-24 session: live deploy stood up, HUD tweaks, instructions screen
+
+Full hosting pipeline (previously partially set up, see
+`docs/deployment.md`) was finished and verified working end-to-end this
+session: client on Vercel (`wss://brutaltank.aktiva.com.au/ws` via an
+nginx TLS reverse proxy on a separate machine, required since Vercel is
+HTTPS-only and browsers block `ws://` from an HTTPS page), server on the
+friend's VM auto-deployed by `.github/workflows/deploy-server.yml`. Two
+real bugs found and fixed in that pipeline — see `docs/deployment.md`'s
+"Fixed bug" section for full detail: (1) `Get-CimInstance`-based old-
+process kill crashed the SSH-spawned PowerShell host silently, replaced
+with a `Get-NetTCPConnection`-based port lookup; (2) `Start-Process`-
+launched servers died the moment the deploying SSH session closed (Windows
+Job Object inheritance) — fixed by launching via a Scheduled Task instead,
+which survives session close.
+
+UI work this session, all shipped:
+- **Angle/power sliders** (`FireControls.svelte`) — bigger track/thumb,
+  angle in blue, power in amber (unused hue elsewhere), power widened 30%
+  further per follow-up request — reflects them being "the main tools".
+- **Shop shields** (`ShopOverlay.svelte`/`ShopItemCard.svelte`) — violet
+  accent (unused hue elsewhere) plus a 2-word blurb per shield (Absorb:
+  "Halves damage", Deflect: "Blocks once", Reflect: "Refunds cash"),
+  design-approved via a mockup canvas before building.
+- **Instructions screen** (`InstructionsScreen.svelte`, new) — inserted
+  between clicking Ready in the lobby and `SetReady` actually being sent
+  (`LobbyScreen.svelte`'s `showInstructions` local state; no protocol
+  change). Diagram uses real rendering colors (sky/terrain from
+  `GameCanvas.svelte`/`terrainRenderer.ts`, tank colors from
+  `Match.java`'s `COLORS[]`) and literal copies of the real weapon chip/
+  sliders/buttons/shield card styling rather than illustrated icons, per
+  explicit user follow-up ("images or diagrams that reflect our finished
+  UI UX"). One of 3 directions from an earlier design-canvas exploration
+  (`https://claude.ai/code/artifact/5ca7a0b9-7cb5-4dbc-823e-f2a72497e484`),
+  user picked "A: Illustrated Diagram".
+- **Post-match "Back to Start" button** (`PostMatchScreen.svelte`) — wired
+  `matchStore.reset()`/`lobbyStore.reset()` (both already existed for
+  exactly this, only ever called from tests before) to a new button.
+- **Shop backup timer bumped 120s -> 600s** (`Match.java`'s
+  `DEFAULT_SHOP_TIMEOUT_MS`) — the 120s value (set 2026-08-22) was still
+  firing during genuine normal-length shopping, force-starting the round
+  mid-browse. User explicitly chose "much longer backup timer" over
+  "remove entirely" when asked, so this stays a safety net (e.g. AFK
+  player), not a hard requirement to click Continue.
+
+Also filed, not yet fixed: MIRV split-animation client rendering bug
+(children render as straight-line lerps from the split point rather than
+continuing an arc — see `PLAN.md` Future Ideas) and a CloseWait
+connection-leak in `BrutalTankServer.java` (no ping/pong keepalive or
+idle-timeout reaping, observed live on the deployed server).
