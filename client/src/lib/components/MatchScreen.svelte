@@ -54,23 +54,55 @@
 	// longer than the 5s flash should last).
 	let winnerFlashing = false;
 	let flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Round-end splash (per user request, 2026-08-24: "once the round ends
+	// we need a round ended screen, even if it is a splash screen for two
+	// seconds") -- the shop opens immediately server-side the instant a round
+	// ends (Match.java's openShop() runs right after RoundEnded), so without
+	// this the shop UI just appears with zero transition. Purely a client-
+	// side visual gate: for splashShowing's 2s window, this covers the
+	// screen so the round result actually registers before the shop
+	// underneath becomes visible/interactive, rather than changing when the
+	// server actually opens the shop.
+	let splashShowing = false;
+	let splashTimer: ReturnType<typeof setTimeout> | null = null;
+
 	let lastRoundEndedInfo: typeof $matchStore.roundEndedInfo = null;
 	$: {
 		const info = $matchStore.roundEndedInfo;
-		if (info !== null && lastRoundEndedInfo === null && info.winnerPlayerId) {
-			winnerFlashing = true;
-			playRoundWin();
-			if (flashTimer !== null) clearTimeout(flashTimer);
-			flashTimer = setTimeout(() => (winnerFlashing = false), 5000);
+		if (info !== null && lastRoundEndedInfo === null) {
+			splashShowing = true;
+			if (splashTimer !== null) clearTimeout(splashTimer);
+			splashTimer = setTimeout(() => (splashShowing = false), 2000);
+
+			if (info.winnerPlayerId) {
+				winnerFlashing = true;
+				playRoundWin();
+				if (flashTimer !== null) clearTimeout(flashTimer);
+				flashTimer = setTimeout(() => (winnerFlashing = false), 5000);
+			}
 		}
 		lastRoundEndedInfo = info;
 	}
 	onDestroy(() => {
 		if (flashTimer !== null) clearTimeout(flashTimer);
+		if (splashTimer !== null) clearTimeout(splashTimer);
 	});
 </script>
 
 <div class="match-screen">
+	{#if splashShowing && $matchStore.roundEndedInfo}
+		<div class="round-end-splash">
+			{#if $matchStore.roundEndedInfo.winnerPlayerId}
+				<h2 style="--winner-color: {playerColor($matchStore.roundEndedInfo.winnerPlayerId)}">
+					Round Over &mdash; {playerName($matchStore.roundEndedInfo.winnerPlayerId)} wins!
+				</h2>
+			{:else}
+				<h2>Round Over &mdash; Draw</h2>
+			{/if}
+		</div>
+	{/if}
+
 	<GameCanvas />
 
 	{#if $matchStore.matchId === null}
@@ -160,6 +192,7 @@
 
 <style>
 	.match-screen {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
@@ -293,6 +326,43 @@
 
 	.trajectory-help-badge.on {
 		color: #7fd9c4;
+	}
+
+	/* 2s full-cover splash on round end (per user request, 2026-08-24) --
+	   the shop already renders underneath by the time this shows (the
+	   server opens it immediately), this just visually gates it for a
+	   beat so the round result registers before the shop grabs attention. */
+	.round-end-splash {
+		position: absolute;
+		inset: 0;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.88);
+		border-radius: 8px;
+		animation: splash-fade 2s ease-in-out forwards;
+	}
+
+	.round-end-splash h2 {
+		margin: 0;
+		padding: 0 1.5rem;
+		text-align: center;
+		font-family: system-ui, sans-serif;
+		font-size: 1.8rem;
+		letter-spacing: 0.03em;
+		color: var(--winner-color, #fff);
+		text-shadow: 0 0 10px color-mix(in srgb, var(--winner-color, #fff) 60%, transparent);
+	}
+
+	@keyframes splash-fade {
+		0%,
+		75% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0;
+		}
 	}
 
 	.round-end-overlay {
