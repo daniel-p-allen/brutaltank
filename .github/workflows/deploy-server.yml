@@ -38,7 +38,16 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "gradlew installDist failed with exit code $LASTEXITCODE" }
 
               Write-Output "STEP: start server"
-              Start-Process -FilePath ".\build\install\brutaltank-server\bin\brutaltank-server.bat" -WindowStyle Hidden
+              # Start-Process alone doesn't survive the SSH session closing: Windows
+              # nests child processes into the same Job Object as the SSH session by
+              # default, and sshd kills that whole job when the session ends. A
+              # Scheduled Task runs fully outside that job, so it survives.
+              $taskName = "BrutalTankServer"
+              $exePath = (Resolve-Path ".\build\install\brutaltank-server\bin\brutaltank-server.bat").Path
+              schtasks /Delete /TN $taskName /F 2>$null
+              schtasks /Create /TN $taskName /TR "`"$exePath`"" /SC ONCE /ST 00:00 /RL HIGHEST /F | Out-Null
+              schtasks /Run /TN $taskName
+              if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed with exit code $LASTEXITCODE" }
 
               Write-Output "STEP: done"
             } catch {
