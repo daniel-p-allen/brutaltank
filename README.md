@@ -2,7 +2,7 @@
 
 A turn-based, multiplayer 2D artillery game — a modernized remake in the spirit of *Scorched Earth* / *Scorched Tanks* / *Pocket Tanks*. Players take turns dialing in angle and power to lob shells across destructible terrain, with a curated weapon roster, shields, and a between-round shop economy. Built with a Svelte + Canvas 2D frontend and a server-authoritative Java/Undertow WebSocket backend.
 
-**Status: in progress, M0 scaffolding stage.** The repo currently contains project structure and the hand-maintained protocol doc; gameplay, lobby, and shop systems are being built up through the milestones described in `PLAN.md`.
+**Status: M0-M4 shipped** (scaffolding, lobby/match core, weapons/shields, terrain destruction, shop/economy). See `PLAN.md` section 5 for milestone definitions and `CLAUDE.md` for a running log of what's been built and fixed session to session.
 
 See `PLAN.md` for the full design/implementation plan and `docs/architecture.md` for the living copy of it.
 
@@ -12,8 +12,8 @@ See `PLAN.md` for the full design/implementation plan and `docs/architecture.md`
 
 ## Testing
 
-- **Server**: JUnit 5 (`server/src/test/java/...`), run via `cd server && ./gradlew test`. Currently covers the WS echo smoke test; domain logic tests (terrain, projectile, damage, turn state machine — see `PLAN.md` section 6.1) land alongside their corresponding milestone.
-- **Client**: Vitest (`client/src/**/*.test.ts`), run via `cd client && npm run test`. Currently covers `wsClient`'s connection state machine and reconnect/backoff behavior, and `connectionStore`'s status/latency tracking, all against a fake in-memory WebSocket (`lib/net/mockWebSocket.test-util.ts`) — no real network or server needed.
+- **Server**: JUnit 5 (`server/src/test/java/...`), run via `cd server && ./gradlew test`. 77 tests covering terrain, projectile physics, damage/economy rules, the turn state machine, and match lifecycle, alongside the original WS echo smoke test.
+- **Client**: Vitest (`client/src/**/*.test.ts`), run via `cd client && npm run test`. 50 tests covering `wsClient`'s connection state machine and reconnect/backoff behavior, `connectionStore`'s status/latency tracking (all against a fake in-memory WebSocket, `lib/net/mockWebSocket.test-util.ts` — no real network or server needed), plus store/logic tests added alongside later milestones.
 - **Multiplayer/E2E**: manual, via multiple browser tabs against one local server (see below). Automating this (e.g. with Playwright driving several browser contexts) is deferred until there's real gameplay to assert on — not worth the setup cost during scaffolding.
 
 ## Monorepo layout
