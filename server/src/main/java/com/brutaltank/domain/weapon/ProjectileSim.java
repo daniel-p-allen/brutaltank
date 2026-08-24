@@ -42,6 +42,23 @@ public final class ProjectileSim {
 
     public static final double GRAVITY = 220.0; // units/s^2
     public static final double WIND_ACCEL_PER_STRENGTH = 4.0;
+    // Wind was applied as a constant per-step accel with no cap on how long
+    // it accumulates (vx += windAccel*DT every step for the shot's whole
+    // flight). A normal high-arc shot flies ~1-8s, so wind's contribution
+    // stayed roughly proportionate to windStrength as intended. But BOUNCING
+    // shots (each of 3-5 bounces adds more hangtime on top of the original
+    // arc — MAX_BOUNCE_VY alone implies up to ~3.6s of extra hangtime per
+    // bounce) and very long/shallow flights could rack up 15-20s of
+    // accumulation, letting even weak wind end up contributing more to vx
+    // than the shot's own launch velocity ("wind 5 having an unusual
+    // effect... bouncing occasionally seem to go super fast" — user report,
+    // 2026-08-24). This caps wind's *cumulative* contribution to vx
+    // independent of flight duration instead: 300 sits just above what a
+    // normal max-power 45deg shot accumulates at max wind today (~308 over
+    // its ~7.7s vacuum flight time), so ordinary shots are visually
+    // unchanged and only pathologically long flights (bounces, shallow
+    // skims) stop compounding past this point.
+    public static final double MAX_WIND_VX_CONTRIBUTION = 300.0;
     public static final double DT = 1.0 / 60.0;
     // 12.0 doubles the old 6.0 (per user feedback: today's max power should
     // become the new 50% mark) — max-power/45deg vacuum range is now ~6544
@@ -221,6 +238,9 @@ public final class ProjectileSim {
         // roster) leaves wind exactly as it was.
         double windAccel = windStrength * WIND_ACCEL_PER_STRENGTH / gravityMultiplier;
         double gravity = GRAVITY * gravityMultiplier;
+        // Cumulative wind contribution to vx so far this shot, clamped each
+        // step to +/-MAX_WIND_VX_CONTRIBUTION — see that constant's javadoc.
+        double windVx = 0.0;
 
         List<double[]> path = new ArrayList<>();
         path.add(new double[] {x, y});
@@ -240,7 +260,10 @@ public final class ProjectileSim {
 
         for (int step = 0; step < MAX_STEPS; step++) {
             double vyBefore = vy;
-            vx += windAccel * DT;
+            double clampedWindVx = Math.max(-MAX_WIND_VX_CONTRIBUTION,
+                    Math.min(MAX_WIND_VX_CONTRIBUTION, windVx + windAccel * DT));
+            vx += clampedWindVx - windVx;
+            windVx = clampedWindVx;
             vy += gravity * DT;
 
             if (stopAtApex && vyBefore < 0 && vy >= 0) {

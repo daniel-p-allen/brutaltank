@@ -198,6 +198,48 @@ class ProjectileSimTest {
     }
 
     @Test
+    void windContributionToVxIsCappedRegardlessOfFlightDuration() {
+        // Regression test for a real bug: wind was applied as a constant
+        // per-step accel with no cap on how long it accumulates, so a shot
+        // with an unusually long flight time (bouncing's several bounces
+        // each add hangtime) could pick up far more wind-driven speed than a
+        // normal shot under the same wind strength ("wind 5 having an
+        // unusual effect... bouncing occasionally seem to go super fast" --
+        // user report, 2026-08-24). A steep bounce sequence (3 bounces,
+        // MAX_BOUNCE_VY-clamped hangtime each) is a real long-duration case.
+        Terrain noWindTerrain = flatTerrain(500);
+        ProjectileSim.Result noWind = ProjectileSim.simulate(200, 400, 85, 100, 0, noWindTerrain,
+                Collections.emptyList(), WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
+
+        Terrain windyTerrain = flatTerrain(500);
+        ProjectileSim.Result windy = ProjectileSim.simulate(200, 400, 85, 100, 10, windyTerrain,
+                Collections.emptyList(), WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
+
+        double windContribution = windy.finalVx - noWind.finalVx;
+        assertTrue(windContribution <= ProjectileSim.MAX_WIND_VX_CONTRIBUTION + 1.0,
+                "wind's contribution to vx should stay capped even over a long bounce sequence, got "
+                        + windContribution);
+    }
+
+    @Test
+    void windContributionIsUnchangedForANormalShortFlightShot() {
+        // Regression guard: the cap must not visibly change ordinary
+        // (short-flight) shots -- only pathologically long ones.
+        Terrain noWindTerrain = flatTerrain(500);
+        ProjectileSim.Result noWind = ProjectileSim.simulate(200, 400, 45, 50, 0, noWindTerrain,
+                Collections.emptyList());
+
+        Terrain windyTerrain = flatTerrain(500);
+        ProjectileSim.Result windy = ProjectileSim.simulate(200, 400, 45, 50, 10, windyTerrain,
+                Collections.emptyList());
+
+        double windContribution = windy.finalVx - noWind.finalVx;
+        assertTrue(windContribution < ProjectileSim.MAX_WIND_VX_CONTRIBUTION,
+                "a normal short-flight shot should never actually reach the cap, got " + windContribution);
+        assertTrue(windContribution > 0, "wind should still push a normal shot's vx, got " + windContribution);
+    }
+
+    @Test
     void stopAtApexTerminatesWithNearZeroVerticalVelocity() {
         Terrain terrain = flatTerrain(500);
         ProjectileSim.Result apex = ProjectileSim.simulate(200, 400, 60, 55, 0, terrain,

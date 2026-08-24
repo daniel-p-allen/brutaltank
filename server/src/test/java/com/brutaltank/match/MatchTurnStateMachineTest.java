@@ -1,5 +1,6 @@
 package com.brutaltank.match;
 
+import com.brutaltank.domain.weapon.WeaponDef;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -194,6 +195,75 @@ class MatchTurnStateMachineTest {
         assertNotNull(matchEnded);
         assertTrue(matchEnded.get("finalStandings").isArray());
         assertEquals(2, matchEnded.get("finalStandings").size());
+    }
+
+    // -----------------------------------------------------------------
+    // Rematch (PlayAgain): regression coverage for a real bug -- "Back to
+    // Start" used to strand players at the menu since there was no path
+    // back from COMPLETE to WAITING, forcing a full re-login/match-creation
+    // cycle every time instead of returning to the same lobby.
+    // -----------------------------------------------------------------
+
+    @Test
+    @Timeout(10)
+    void rematchResetsAnEndedMatchBackToWaitingWithTheSameRoster() {
+        Match match = newMatch("m-rematch-1", 1, 8); // maxRounds = 1
+        match.setTurnTimeoutMs(30_000);
+        Joined p1 = join(match, "P1");
+        Joined p2 = join(match, "P2");
+        match.setReady(p1.playerId(), true);
+        match.setReady(p2.playerId(), true);
+
+        // p2 is already down, so p1's shot (spending baby_missile ammo, so
+        // the loadout reset below is actually observable) ends the round --
+        // and the match, since maxRounds=1.
+        match.debugSetHealth(p2.playerId(), 0);
+        assertTrue(match.fire(p1.playerId(), "r1", "baby_missile", 45, 40).accepted());
+
+        assertEquals(Match.Status.COMPLETE, match.status());
+
+        match.rematch(p1.playerId());
+
+        assertEquals(Match.Status.WAITING, match.status());
+        assertEquals(1, match.roundNumber());
+        assertEquals(500, match.cashOf(p1.playerId()));
+        assertEquals(500, match.cashOf(p2.playerId()));
+        assertEquals(100.0, match.healthOf(p1.playerId()));
+        assertEquals(100.0, match.healthOf(p2.playerId()));
+        assertTrue(match.isAlive(p1.playerId()));
+        assertTrue(match.isAlive(p2.playerId()));
+        // Loadout reset to defaults, not carried over depleted.
+        assertEquals(WeaponDef.byId("baby_missile").defaultQty(), match.loadoutQtyOf(p1.playerId(), "baby_missile"));
+
+        var lobbyUpdate = p1.sink().lastPayloadOfType("LobbyUpdate");
+        assertNotNull(lobbyUpdate, "rematch should broadcast a LobbyUpdate so clients route back to the lobby");
+        assertEquals(2, lobbyUpdate.get("players").size());
+        for (var playerNode : lobbyUpdate.get("players")) {
+            assertFalse(playerNode.get("ready").asBoolean(), "players should need to ready up again for the new match");
+        }
+
+        // The reset lobby is fully functional: readying both players again
+        // starts a brand-new match from round 1.
+        match.setReady(p1.playerId(), true);
+        match.setReady(p2.playerId(), true);
+        assertEquals(Match.Status.IN_PROGRESS, match.status());
+        assertEquals(1, match.roundNumber());
+    }
+
+    @Test
+    @Timeout(10)
+    void rematchIsANoOpUnlessTheMatchHasEnded() {
+        Match match = newMatch("m-rematch-2", 4, 8);
+        Joined p1 = join(match, "P1");
+        join(match, "P2");
+
+        match.rematch(p1.playerId()); // match is still WAITING -- no-op
+        assertEquals(Match.Status.WAITING, match.status());
+
+        match.setReady(p1.playerId(), true);
+        // Only p1 ready -- match still WAITING, not IN_PROGRESS.
+        match.rematch(p1.playerId()); // still not COMPLETE -- no-op
+        assertEquals(Match.Status.WAITING, match.status());
     }
 
     @Test

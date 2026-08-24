@@ -576,13 +576,15 @@ class WeaponAndShieldTest {
     }
 
     // -----------------------------------------------------------------
-    // Risk/reward: firing without Trajectory Help does +25% damage and 2x
-    // cash on that shot (user decision, 2026-08-23).
+    // Risk/reward: firing without Trajectory Help earns +25% cash, with
+    // damage unchanged (revised 2026-08-24 — the original design also
+    // boosted damage 25%, which compounded with a 2x cash rate to an
+    // effective ~2.5x cash reward; reverted to a flat +25% cash bonus).
     // -----------------------------------------------------------------
 
     @Test
     @Timeout(10)
-    void firingWithoutTrajectoryHelpDoesMoreDamageAndEarnsMoreCash() {
+    void firingWithoutTrajectoryHelpEarnsMoreCashButSameDamage() {
         double angle = 30;
         double power = 60;
         double[] tip = barrelTip(200, 500, angle);
@@ -619,17 +621,12 @@ class WeaponAndShieldTest {
         double noHelpDamageDealt = noHelpHealthBefore - noHelp.healthOf(noHelpTarget.playerId());
         int noHelpCashEarned = noHelp.cashOf(noHelpShooter.playerId()) - noHelpCashBefore;
 
-        assertEquals(Math.round(helpDamageDealt * 1.25), noHelpDamageDealt, 1.0,
-                "no-help shot should deal ~25% more damage: withHelp=" + helpDamageDealt + " noHelp=" + noHelpDamageDealt);
-        // Cash is earned from the shot's actual damage dealt (CASH_PER_DAMAGE
-        // per point), which is itself already +25% boosted here — so the two
-        // bonuses compound (1.25 damage x 2.0 cash-rate = ~2.5x total cash),
-        // not a flat 2x. That's the intended interaction (cash tracks real
-        // damage dealt, same as every other shot), not a bug.
+        assertEquals(helpDamageDealt, noHelpDamageDealt, 1.0,
+                "no-help shot should deal the same damage as a help shot: withHelp=" + helpDamageDealt
+                        + " noHelp=" + noHelpDamageDealt);
         double cashRatio = (double) noHelpCashEarned / helpCashEarned;
-        assertTrue(cashRatio > 2.3 && cashRatio < 2.7,
-                "no-help shot should earn ~2.5x cash (2x rate on already-boosted damage), several independent "
-                        + "roundings make an exact multiple fragile so this allows some slack: withHelp="
+        assertTrue(cashRatio > 1.15 && cashRatio < 1.35,
+                "no-help shot should earn ~25% more cash, some slack for independent roundings: withHelp="
                         + helpCashEarned + " noHelp=" + noHelpCashEarned + " ratio=" + cashRatio);
     }
 

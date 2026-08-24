@@ -14,10 +14,12 @@ import io.undertow.websockets.core.BufferedTextMessage;
 import io.undertow.websockets.core.WebSocketChannel;
 import io.undertow.websockets.spi.WebSocketHttpExchange;
 
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -34,6 +36,15 @@ public final class BrutalTankServer {
     private static final Logger LOG = Logger.getLogger(BrutalTankServer.class.getName());
     private static final int PORT = 6154;
     private static final String HOST = "0.0.0.0";
+    // A dropped TCP connection (tab closed, network drop, laptop sleep) never
+    // sends a WS close frame, so onClose never fires and the socket sits in
+    // CLOSE_WAIT indefinitely -- observed live on the deployed server (9
+    // stale connections). wsClient.ts now sends a Ping every 20s
+    // (PING_INTERVAL_MS) while genuinely connected, which keeps
+    // PlayerSession.lastSeenAt fresh via session.touch(); this periodic reap
+    // forcibly closes anything that's gone quiet well past that cadence.
+    private static final long DEFAULT_IDLE_TIMEOUT_MS = 90_000;
+    private static final long DEFAULT_IDLE_REAP_INTERVAL_MS = 30_000;
 
     private final Undertow server;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -47,6 +58,8 @@ public final class BrutalTankServer {
     private final LobbyManager lobbyManager;
     private final ConcurrentHashMap<WebSocketChannel, PlayerSession> sessions = new ConcurrentHashMap<>();
 
+    private final long idleTimeoutMs;
+
     public BrutalTankServer() {
         this(-1, -1);
     }
@@ -59,7 +72,20 @@ public final class BrutalTankServer {
      * default.
      */
     public BrutalTankServer(long turnTimeoutMsOverride, long reconnectGraceMsOverride) {
+        this(turnTimeoutMsOverride, reconnectGraceMsOverride, -1, -1);
+    }
+
+    /**
+     * Test-only constructor: additionally overrides the idle-connection reap
+     * timeout/check-interval (see DEFAULT_IDLE_TIMEOUT_MS's javadoc) so a
+     * test can drive that path without waiting the real 90s production
+     * threshold. Pass -1 for either to keep the production default.
+     */
+    public BrutalTankServer(long turnTimeoutMsOverride, long reconnectGraceMsOverride,
+                             long idleTimeoutMsOverride, long idleReapIntervalMsOverride) {
         this.lobbyManager = new LobbyManager(matchRegistry, mapper, scheduler, turnTimeoutMsOverride, reconnectGraceMsOverride);
+        this.idleTimeoutMs = idleTimeoutMsOverride > 0 ? idleTimeoutMsOverride : DEFAULT_IDLE_TIMEOUT_MS;
+        long idleReapIntervalMs = idleReapIntervalMsOverride > 0 ? idleReapIntervalMsOverride : DEFAULT_IDLE_REAP_INTERVAL_MS;
 
         // Per the concurrency model in PLAN.md, off-I/O-thread work runs on Java 21
         // virtual threads rather than pooled platform threads, since dispatched work
@@ -70,6 +96,29 @@ public final class BrutalTankServer {
                 .addHttpListener(PORT, HOST)
                 .setHandler(Handlers.websocket((exchange, channel) -> onConnect(exchange, channel, virtualThreadExecutor)))
                 .build();
+
+        scheduler.scheduleAtFixedRate(() -> reapIdleConnections(virtualThreadExecutor),
+                idleReapIntervalMs, idleReapIntervalMs, TimeUnit.MILLISECONDS);
+    }
+
+    /** Forcibly closes any connection whose PlayerSession has gone quiet past idleTimeoutMs -- see DEFAULT_IDLE_TIMEOUT_MS's javadoc. */
+    private void reapIdleConnections(ExecutorService executor) {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<WebSocketChannel, PlayerSession> entry : sessions.entrySet()) {
+            WebSocketChannel channel = entry.getKey();
+            PlayerSession session = entry.getValue();
+            if (now - session.lastSeenAt <= idleTimeoutMs) {
+                continue;
+            }
+            LOG.info("Reaping idle connection: " + channel.hashCode());
+            sessions.remove(channel);
+            executor.execute(() -> lobbyManager.handleSocketClosed(session));
+            try {
+                channel.close();
+            } catch (java.io.IOException e) {
+                LOG.log(Level.FINE, "Error closing idle channel", e);
+            }
+        }
     }
 
     private void onConnect(WebSocketHttpExchange exchange, WebSocketChannel channel, ExecutorService executor) {
@@ -133,6 +182,7 @@ public final class BrutalTankServer {
                 case "Rejoin" -> lobbyManager.handleRejoin(session, sink, envelope.requestId,
                         mapper.treeToValue(payloadNode, Payloads.Rejoin.class));
                 case "LeaveMatch" -> lobbyManager.handleLeaveMatch(session);
+                case "PlayAgain" -> lobbyManager.handlePlayAgain(session);
                 case "Fire" -> handleFire(session, sink, envelope, payloadNode);
                 case "ShopPurchase" -> handleShopPurchase(session, sink, envelope, payloadNode);
                 case "ShopContinue" -> handleShopContinue(session);

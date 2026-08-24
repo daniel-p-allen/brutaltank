@@ -38,6 +38,7 @@ describe('matchStore', () => {
 	let applyMatchStateSync: typeof import('./matchStore').applyMatchStateSync;
 	let applyShotResolved: typeof import('./matchStore').applyShotResolved;
 	let pendingShotAnimation: typeof import('./shotAnimationStore').pendingShotAnimation;
+	let clearShotAnimation: typeof import('./shotAnimationStore').clearShotAnimation;
 	let get: typeof import('svelte/store').get;
 
 	beforeEach(async () => {
@@ -46,7 +47,7 @@ describe('matchStore', () => {
 		vi.resetModules();
 		({ get } = await import('svelte/store'));
 		({ matchStore, applyMatchStateSync, applyShotResolved } = await import('./matchStore'));
-		({ pendingShotAnimation } = await import('./shotAnimationStore'));
+		({ pendingShotAnimation, clearShotAnimation } = await import('./shotAnimationStore'));
 	});
 
 	it('starts empty', () => {
@@ -329,6 +330,114 @@ describe('matchStore', () => {
 		const state = get(matchStore);
 		expect(state.status).toBe('COMPLETE');
 		expect(state.matchEndedInfo?.finalStandings).toHaveLength(1);
+	});
+
+	// Regression tests for a real bug: RoundEnded/ShopOpened/MatchEnded used
+	// to apply to state (and thus MatchScreen's round-end splash) the instant
+	// they arrived, even though the server sends them synchronously right
+	// after the killing shot's ShotResolved -- before that shot's flight/
+	// impact animation had actually played client-side. Fix: hold them back
+	// while shotAnimationStore.pendingShotAnimation is non-null, and flush
+	// once it clears (mirroring what GameCanvas.svelte does on real impact).
+	const killingShot: ShotResolvedPayload = {
+		shooterId: 'p-1',
+		weaponId: 'basic_shell',
+		trajectory: [{ x: 1, y: 101 }],
+		impact: { x: 8, y: 108 },
+		terrainDelta: { startX: 0, endX: 0, heights: [99] },
+		damageEvents: [{ playerId: 'p-2', damage: 100, newHealth: 0, eliminated: true, activeShieldId: null }],
+		cashEarned: [],
+		tankFalls: [],
+		ammoRemaining: -1,
+		allImpacts: [{ x: 8, y: 108 }]
+	};
+
+	it('holds RoundEnded back while a shot animation is in flight, then flushes on clear', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'ShotResolved', v: 1, requestId: 'r1', payload: killingShot })
+		);
+		expect(get(pendingShotAnimation)).not.toBeNull();
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'RoundEnded',
+				v: 1,
+				payload: { winnerPlayerId: 'p-1', standings: [{ playerId: 'p-1', cash: 500 }] }
+			})
+		);
+		expect(get(matchStore).roundEndedInfo).toBeNull();
+
+		clearShotAnimation();
+		expect(get(matchStore).roundEndedInfo?.winnerPlayerId).toBe('p-1');
+	});
+
+	it('holds ShopOpened back while a shot animation is in flight, then flushes on clear', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'ShotResolved', v: 1, requestId: 'r1', payload: killingShot })
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'ShopOpened',
+				v: 1,
+				payload: { timeoutSec: 30, priceList: [{ itemId: 'heavy_cannonball', itemType: 'WEAPON', price: 150, stock: 10 }] }
+			})
+		);
+		expect(get(matchStore).status).toBe('IN_PROGRESS'); // not yet flipped to SHOP
+
+		clearShotAnimation();
+		expect(get(matchStore).status).toBe('SHOP');
+	});
+
+	it('holds MatchEnded back while a shot animation is in flight, then flushes on clear', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'ShotResolved', v: 1, requestId: 'r1', payload: killingShot })
+		);
+
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({
+				type: 'MatchEnded',
+				v: 1,
+				payload: { finalStandings: [{ playerId: 'p-1', cash: 500, damageDealt: 100, kills: 1 }] }
+			})
+		);
+		expect(get(matchStore).status).toBe('IN_PROGRESS'); // not yet flipped to COMPLETE
+
+		clearShotAnimation();
+		expect(get(matchStore).status).toBe('COMPLETE');
+		expect(get(matchStore).matchEndedInfo?.finalStandings).toHaveLength(1);
+	});
+
+	it('applies RoundEnded immediately when no shot animation is in flight', async () => {
+		const { wsClient } = await import('../net/wsClient');
+		wsClient.connect();
+		MockWebSocket.latest().emitOpen();
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'MatchStateSync', v: 1, payload: samplePayload })
+		);
+		// No ShotResolved first -- e.g. a safety-cap draw.
+		MockWebSocket.latest().emitMessage(
+			JSON.stringify({ type: 'RoundEnded', v: 1, payload: { winnerPlayerId: null, standings: [] } })
+		);
+		expect(get(matchStore).roundEndedInfo).not.toBeNull();
 	});
 
 	it('tracks disconnected players and clears them on reconnect', async () => {

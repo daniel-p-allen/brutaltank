@@ -115,13 +115,15 @@ for Nuke specifically) is now built deliberately:
 (label reads "N/A") and `GameCanvas.svelte`'s `NUKE_WEAPON_ID` check
 suppresses the dotted preview, both keyed off `weaponSelectStore === 'nuke'`.
 
-**Risk/reward for skipping Trajectory Help, same session (2026-08-23):**
-firing without it grants +25% damage and 2x cash on that shot (the two
-compound to ~2.5x cash — confirmed as intended, not a bug — since cash is
-earned from the already-boosted damage). `Fire.trajectoryHelpUsed`
-(client-trusted, see `shared/protocol.md`) drives
-`Match.applyDetonations`'s multipliers; Nuke always gets the bonus since
-help is never available there. Building this surfaced a real gap: player
+**Risk/reward for skipping Trajectory Help** (2026-08-23, revised
+2026-08-24): firing without it grants +25% cash on that shot, damage
+unchanged. Originally also boosted damage 25%, which compounded with a 2x
+cash rate to an effective ~2.5x cash reward — per live-playtest feedback
+("it should not be 2.5x... it should be +25% for money, but not the
+damage") this was reverted to a flat +25% cash-only bonus.
+`Fire.trajectoryHelpUsed` (client-trusted, see `shared/protocol.md`) drives
+`Match.applyDetonations`'s `NO_HELP_CASH_MULTIPLIER`; Nuke always gets the
+bonus since help is never available there. Building this surfaced a real gap: player
 cash was never live-updated from `ShotResolved.cashEarned` client-side
 (only from `ShopUpdate`/`TurnForfeited`) — fixed in `matchStore.ts`'s
 `applyShotResolved`. Also added a new live broadcast pair,
@@ -227,16 +229,10 @@ UI work this session, all shipped:
   "remove entirely" when asked, so this stays a safety net (e.g. AFK
   player), not a hard requirement to click Continue.
 
-Also filed, not yet fixed: MIRV split-animation client rendering bug
-(children render as straight-line lerps from the split point rather than
-continuing an arc — see `PLAN.md` Future Ideas), a CloseWait
-connection-leak in `BrutalTankServer.java` (no ping/pong keepalive or
-idle-timeout reaping, observed live on the deployed server), and a
-killing-shot-skips-its-own-animation bug (round ends before the client's
-flight/explosion animation for the fatal shot has played — `Match.java`
-broadcasts `RoundEnded`+opens the shop synchronously right after
-`ShotResolved` for the same shot; needs a client-side deferral, same
-category as the two 2026-08-23 tank-falls-before-shot-lands fixes).
+Also filed this session: MIRV split-animation client rendering bug, a
+CloseWait connection-leak in `BrutalTankServer.java`, and a
+killing-shot-skips-its-own-animation bug. **All three fixed the same day**
+— see the "2026-08-24 session, part 2" section below.
 
 **2s round-end splash added** (`MatchScreen.svelte`'s `.round-end-splash`,
 `splashShowing` state) — per user request ("even if it is a splash screen
@@ -245,3 +241,90 @@ with zero transition. Purely a client-side visual gate over the whole
 match screen for 2s on `RoundEnded`, not a server-side timing change —
 the shop underneath is already open/interactive the moment the splash
 starts, this only delays it being *visible*.
+
+## 2026-08-24 session, part 2: rematch flow, death-delay/splash root cause, wind runaway, reward rebalance
+
+Live-playtest feedback the same day surfaced 4 more issues; folded in the 3
+bugs filed earlier that day (MIRV animation, CloseWait leak, killing-shot-
+skips-animation) since two of them shared a root cause with the new
+reports. Full investigation notes in the session's plan file
+(`cryptic-sniffing-crab.md`); summary of what shipped:
+
+1. **"Back to Start" now returns to the same lobby, no re-login.**
+   `PostMatchScreen`'s button used to only reset client-side stores, which
+   stranded the player at the menu since there was no server-side path back
+   from `Status.COMPLETE` to `WAITING`. Added `PlayAgain`
+   (`shared/protocol.md`) → `Match.rematch()`: resets the *same* `Match` in
+   place (same connections/`matchId`/`playerToken`, no re-auth) — every
+   non-departed player's cash/health/loadout/ready state back to fresh-match
+   defaults, departed players dropped, `LobbyUpdate` broadcast. Any
+   connected player can trigger it (no host gate, symmetric with
+   `SetReady`). `matchStore.ts` clears its own `COMPLETE`/`matchEndedInfo`
+   state on that `LobbyUpdate` so `App.svelte`'s routing falls through to
+   `LobbyScreen` automatically.
+
+2. **Death/round-end UI (and the shop) no longer shown before the killing
+   shot's animation plays** — this was the actual root cause behind two
+   separate complaints: "the death occurs before we see the animation" and
+   the 2s splash "not appearing to work." `Match.java` broadcasts
+   `RoundEnded`/`ShopOpened`/`MatchEnded` synchronously right after the
+   triggering `ShotResolved`, same tick the client queues that shot's
+   flight/impact animation — `matchStore.ts` used to apply all three
+   immediately, so the splash/shop/standings covered the screen before the
+   kill had visually landed. Fixed by holding them back while
+   `shotAnimationStore.pendingShotAnimation` is non-null and flushing the
+   instant it clears (the same signal `GameCanvas.svelte` already uses to
+   know a shot's animation finished). No change needed to the splash's own
+   logic — it was firing at the right *relative* moment all along, just
+   off the wrong trigger.
+
+3. **Wind's effect on trajectories is now capped independent of flight
+   duration.** Root cause: `ProjectileSim`'s wind accel applied every
+   simulation step for the shot's *entire* flight with no cap — normal
+   high-arc shots (1-8s flight) stayed roughly proportional to wind
+   strength as intended, but BOUNCING shots (each of 3-5 bounces adds more
+   hangtime) could rack up 15-20s of accumulation, letting even weak wind
+   end up contributing more to `vx` than the shot's own launch velocity
+   ("wind 5 having an unusual effect... bouncing occasionally seem to go
+   super fast" — user report). Fixed with `ProjectileSim.MAX_WIND_VX_CONTRIBUTION`
+   (300, tuned to sit just above what a normal max-power 45° shot
+   accumulates today) clamping wind's *cumulative* contribution to `vx`
+   each step, leaving ordinary shots visually unchanged.
+
+4. **Trajectory Help reward rebalanced**: no-help shots used to get +25%
+   damage *and* 2x cash, compounding to ~2.5x cash since cash is earned
+   from the already-boosted damage. Per user feedback ("it should not be
+   2.5x... it should be +25% for money, but not the damage") the damage
+   bonus is removed entirely; `NO_HELP_CASH_MULTIPLIER` is now a flat 1.25
+   (was 2.0).
+
+5. **MIRV children now fall along a real parabola, not a straight-line
+   lerp** — `projectileRenderer.ts`'s fall-phase interpolation used to ease
+   linearly from the split point to each child's impact, reading as
+   "launching from a standstill in all directions." Since the client never
+   receives each child's actual launch velocity, this instead solves for
+   the constant initial velocity that reaches the known impact point at
+   exactly `MIRV_FALL_DURATION_MS` under real gravity (mirrors
+   `ProjectileSim.GRAVITY`) — exact fit at both endpoints, reads as a
+   proper arc in between.
+
+6. **CloseWait connection leak fixed** with a periodic idle-reap task in
+   `BrutalTankServer.java` (closes any connection whose `PlayerSession`
+   hasn't been heard from in 90s) paired with a new periodic `Ping` every
+   20s from `wsClient.ts` while genuinely connected, so a real, still-alive
+   connection never approaches the reap threshold — only a silently-dropped
+   one (no close frame ever sent) does.
+
+**Retest pending as of this commit**: the user's first live playtest after
+this work (same session) still saw both issue #2 (end screen before the
+final shot's animation) and issue #1 (Back to Start returning to the menu,
+not the same lobby) reproduce. Before treating these as surviving bugs,
+confirmed with the user that the local server/client dev processes being
+tested against had **not** been confirmed restarted after this session's
+edits — the Java server in particular has no hot-reload, so a
+still-running pre-fix process would show exactly this old behavior
+regardless of the code changes above. Next step: fully stop and restart
+both `server` (`./gradlew run`) and `client` (`npm run dev`), then retest.
+If either issue still reproduces after a genuine clean restart, it's a
+real regression in the fixes above and needs proper investigation — not
+yet confirmed either way.

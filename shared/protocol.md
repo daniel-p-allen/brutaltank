@@ -121,6 +121,14 @@ On success the server replies with a full `MatchStateSync` so the client can reb
 
 No payload fields. Removes the sender from their current match (lobby or in-progress); triggers a `LobbyUpdate` (lobby phase) or is treated like a disconnect (in-progress phase).
 
+#### `PlayAgain`
+
+```json
+{ "type": "PlayAgain", "v": 1, "requestId": "r6", "payload": {} }
+```
+
+No payload fields. Sent by `PostMatchScreen`'s "Back to Start" button once a match has reached `MatchEnded` (per live-playtest feedback, 2026-08-24: clicking it previously only reset client-side stores, which stranded the player at the menu since there was no server-side path back to `WAITING` — forcing a full re-login/match-creation cycle every time instead of just returning to the same lobby). Resets the *same* `Match` (same connections, same `matchId`/`playerToken` — no new `CreateMatch`/`JoinMatch` needed) back to `Status.WAITING`: every non-departed player's cash/health/loadout/ready state resets to a fresh match's starting values, departed players are dropped. Any connected player may send it (no host gate, symmetric with `SetReady`); a no-op if the match isn't `COMPLETE`, or once it's already back to `WAITING`. Success is the resulting `LobbyUpdate` broadcast — same as any other lobby-roster change — which routes every client's UI back to `LobbyScreen`.
+
 ### Server → Client
 
 #### `MatchCreated`

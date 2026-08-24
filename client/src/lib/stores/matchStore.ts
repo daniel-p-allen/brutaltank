@@ -15,13 +15,18 @@
 //                          message.
 //   - RoundEnded        -> records round-end info; MatchScreen shows this as
 //                          a banner until the next MatchStateSync clears it.
+//                          Held back (see animationInFlight below) if a shot
+//                          animation is still playing, so the killing shot's
+//                          flight/impact is never covered before it's seen.
 //   - MatchEnded        -> records final standings and flips status to
-//                          COMPLETE.
+//                          COMPLETE. Same animation-in-flight deferral as
+//                          RoundEnded.
 //   - PlayerDisconnected/PlayerReconnected -> tracks a small set of
 //                          currently-disconnected playerIds for per-player
 //                          status badges.
 //   - ShopOpened        -> flips status to SHOP and records the price list
 //                          (with initial stock) + timeout for ShopOverlay.
+//                          Same animation-in-flight deferral as RoundEnded.
 //   - ShopUpdate        -> patches the purchasing player's cash/loadout and
 //                          the shared stock pool (broadcast to everyone).
 //   - ErrorMsg          -> currently only surfaced for rejected
@@ -55,7 +60,7 @@ import type {
 	TurnStartedPayload,
 	Wind
 } from '../protocol/types';
-import { queueShotAnimation } from './shotAnimationStore';
+import { pendingShotAnimation, queueShotAnimation } from './shotAnimationStore';
 
 export interface MatchState {
 	matchId: string | null;
@@ -341,6 +346,47 @@ export function applyPlayerReconnected(state: MatchState, playerId: string): Mat
 function createMatchStore() {
 	const { subscribe, set, update } = writable<MatchState>(initialState());
 
+	// RoundEnded/ShopOpened/MatchEnded arrive from the server synchronously
+	// right after the shot that triggered them (the same tick a ShotResolved
+	// queues that shot's flight/impact animation into shotAnimationStore).
+	// Applying them immediately used to make the round-end splash/shop/
+	// final-standings screen cover the board before the killing shot had
+	// visually landed — a real bug (2026-08-24 live-playtest report: "the
+	// death occurs before we see the animation and result"), not the
+	// already-fixed splash-stacking issue. Fix: while a shot animation is
+	// in flight (shotAnimationStore.pendingShotAnimation non-null), hold
+	// these three back and flush them the instant the animation clears
+	// (GameCanvas.svelte calls clearShotAnimation() once
+	// isAnimationFinished() is true). If no animation is in flight when one
+	// arrives (e.g. a safety-cap draw with no final shot), it still applies
+	// immediately — nothing to wait for.
+	let animationInFlight = false;
+	let pendingRoundEnded: RoundEndedPayload | null = null;
+	let pendingShopOpened: ShopOpenedPayload | null = null;
+	let pendingMatchEnded: MatchEndedPayload | null = null;
+
+	pendingShotAnimation.subscribe((anim) => {
+		const wasInFlight = animationInFlight;
+		animationInFlight = anim !== null;
+		if (wasInFlight && !animationInFlight) {
+			if (pendingRoundEnded !== null) {
+				const payload = pendingRoundEnded;
+				pendingRoundEnded = null;
+				update((state) => applyRoundEnded(state, payload));
+			}
+			if (pendingShopOpened !== null) {
+				const payload = pendingShopOpened;
+				pendingShopOpened = null;
+				update((state) => applyShopOpened(state, payload));
+			}
+			if (pendingMatchEnded !== null) {
+				const payload = pendingMatchEnded;
+				pendingMatchEnded = null;
+				update((state) => applyMatchEnded(state, payload));
+			}
+		}
+	});
+
 	wsClient.onMessage((data) => {
 		const envelope = parseEnvelope(data);
 		if (!envelope) return;
@@ -348,6 +394,22 @@ function createMatchStore() {
 		switch (envelope.type) {
 			case 'MatchStateSync':
 				set(applyMatchStateSync(envelope.payload as MatchStateSyncPayload));
+				return;
+
+			// LobbyUpdate is otherwise lobbyStore's message (see
+			// lobbyStore.ts), but a rematch (PlayAgain -> Match.rematch())
+			// sends one to signal the match reset back to WAITING -- if this
+			// store still thinks the match is COMPLETE, clear it back to a
+			// pristine state so App.svelte's screen routing falls through to
+			// LobbyScreen instead of staying on PostMatchScreen.
+			case 'LobbyUpdate':
+				update((state) => {
+					if (state.status !== 'COMPLETE') return state;
+					pendingRoundEnded = null;
+					pendingShopOpened = null;
+					pendingMatchEnded = null;
+					return initialState();
+				});
 				return;
 
 			case 'ShotResolved': {
@@ -392,17 +454,35 @@ function createMatchStore() {
 				update((state) => applyFireRejected(state, envelope.payload as FireRejectedPayload));
 				return;
 
-			case 'RoundEnded':
-				update((state) => applyRoundEnded(state, envelope.payload as RoundEndedPayload));
+			case 'RoundEnded': {
+				const payload = envelope.payload as RoundEndedPayload;
+				if (animationInFlight) {
+					pendingRoundEnded = payload;
+				} else {
+					update((state) => applyRoundEnded(state, payload));
+				}
 				return;
+			}
 
-			case 'MatchEnded':
-				update((state) => applyMatchEnded(state, envelope.payload as MatchEndedPayload));
+			case 'MatchEnded': {
+				const payload = envelope.payload as MatchEndedPayload;
+				if (animationInFlight) {
+					pendingMatchEnded = payload;
+				} else {
+					update((state) => applyMatchEnded(state, payload));
+				}
 				return;
+			}
 
-			case 'ShopOpened':
-				update((state) => applyShopOpened(state, envelope.payload as ShopOpenedPayload));
+			case 'ShopOpened': {
+				const payload = envelope.payload as ShopOpenedPayload;
+				if (animationInFlight) {
+					pendingShopOpened = payload;
+				} else {
+					update((state) => applyShopOpened(state, payload));
+				}
 				return;
+			}
 
 			case 'ShopUpdate':
 				update((state) => applyShopUpdate(state, envelope.payload as ShopUpdatePayload));
@@ -445,6 +525,9 @@ function createMatchStore() {
 
 	/** Resets to the pristine initial state (e.g. returning to the menu after a match ends). */
 	function reset(): void {
+		pendingRoundEnded = null;
+		pendingShopOpened = null;
+		pendingMatchEnded = null;
 		set(initialState());
 	}
 

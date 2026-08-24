@@ -205,6 +205,9 @@ export interface RejoinPayload {
 /** LeaveMatch has no payload fields (protocol.md section 3). */
 export type LeaveMatchPayload = Record<string, never>;
 
+/** PlayAgain has no payload fields (protocol.md section 3). */
+export type PlayAgainPayload = Record<string, never>;
+
 export interface MatchCreatedPayload {
 	matchId: string;
 	joinCode: string;
@@ -256,6 +259,7 @@ export type JoinMatchEnvelope = Envelope<JoinMatchPayload>;
 export type SetReadyEnvelope = Envelope<SetReadyPayload>;
 export type RejoinEnvelope = Envelope<RejoinPayload>;
 export type LeaveMatchEnvelope = Envelope<LeaveMatchPayload>;
+export type PlayAgainEnvelope = Envelope<PlayAgainPayload>;
 export type MatchCreatedEnvelope = Envelope<MatchCreatedPayload>;
 export type MatchJoinedEnvelope = Envelope<MatchJoinedPayload>;
 export type LobbyUpdateEnvelope = Envelope<LobbyUpdatePayload>;

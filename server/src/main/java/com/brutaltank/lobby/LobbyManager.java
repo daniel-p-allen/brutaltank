@@ -137,6 +137,21 @@ public final class LobbyManager {
         session.playerToken = null;
     }
 
+    /**
+     * "Back to Start" (PostMatchScreen.svelte) sends this instead of just
+     * resetting client-side stores, which used to strand the player at the
+     * menu with no lobby to rejoin (there was no server-side path back from
+     * {@code COMPLETE}, forcing a full re-login/match-creation cycle every
+     * time). The session's {@code currentMatchId}/{@code playerId}/{@code
+     * playerToken} stay exactly as they are -- same match, same connection.
+     */
+    public void handlePlayAgain(PlayerSession session) {
+        Match match = matchFor(session);
+        if (match != null) {
+            match.rematch(session.playerId);
+        }
+    }
+
     /** Called from the server on socket close: marks the player's match-side state disconnected. */
     public void handleSocketClosed(PlayerSession session) {
         session.connected = false;

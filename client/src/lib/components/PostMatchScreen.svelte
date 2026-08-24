@@ -3,21 +3,22 @@
 	// (protocol.md section 4), sorted by cash descending per the protocol doc.
 
 	import { matchStore } from '../stores/matchStore';
-	import { lobbyStore } from '../stores/lobbyStore';
 	import { sessionStore } from '../stores/sessionStore';
+	import { sendPlayAgain } from '../net/lobbyActions';
 
 	function playerName(playerId: string): string {
 		return $matchStore.players.find((p) => p.playerId === playerId)?.displayName ?? playerId;
 	}
 
-	// Both stores' reset() already existed for exactly this purpose but were
-	// never wired to anything real (only used in tests) -- this is the only
-	// caller. Client-side only: the match is already over server-side by the
-	// time this screen shows, so there's no in-progress session to tell the
-	// server we're leaving.
+	// Sends PlayAgain so the server resets this same match back to WAITING
+	// with the same roster/session (Match.rematch()) instead of the old
+	// client-only matchStore.reset()/lobbyStore.reset(), which stranded the
+	// player at the menu with no lobby to rejoin, forcing a full re-login/
+	// match-creation cycle every time (per live-playtest feedback,
+	// 2026-08-24). matchStore's own LobbyUpdate handler clears the
+	// COMPLETE/matchEndedInfo state once the server confirms the reset.
 	function backToStart(): void {
-		matchStore.reset();
-		lobbyStore.reset();
+		sendPlayAgain();
 	}
 </script>
 

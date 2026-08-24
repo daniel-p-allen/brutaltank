@@ -30,6 +30,8 @@ const NUKE_EFFECT_DURATION_MS = 1500;
 const NUKE_SMOKE_PUFF_COUNT = 7;
 /** MIRV: how long children take to fall from the split point to their individual landing spots, after the shared climb-to-apex phase ends. */
 const MIRV_FALL_DURATION_MS = 500;
+/** Mirrors ProjectileSim.GRAVITY -- Match.java's MIRV children always simulate with gravityMultiplier=1.0, so this applies unscaled. Keep in sync by hand if either changes (same convention as Match.java's TANK_WORLD_HEIGHT/BARREL_LENGTH mirrors). */
+const MIRV_FALL_GRAVITY = 220;
 
 /** When the impact/flash phase begins for a given shot — normally right after the flight animation, but MIRV with multiple children gets an extra fall phase first so they're visibly seen landing separately, not just flashing at once. */
 export function getImpactPhaseStartMs(weaponId: string, impactCount: number): number {
@@ -195,18 +197,26 @@ export function drawProjectile(
 	// leaving nothing to visually connect the split to each child's landing
 	// spot — per user feedback, "not seeing the falling part of the
 	// children"). Each child gets its own dot falling from the split point
-	// (the trajectory's last point) to its own impact, with a slight
-	// downward-arcing ease rather than a flat linear slide.
+	// to its own impact along a real ballistic parabola under gravity —
+	// not a straight-line lerp (the previous approach, which read as
+	// "launching from a standstill in all directions" per a later bug
+	// report: children never actually continue the parent's momentum on a
+	// straight line, they arc). Since the client never receives each
+	// child's actual launch velocity, this solves for the constant initial
+	// velocity that reaches the known (impact.x, impact.y) at exactly
+	// MIRV_FALL_DURATION_MS under real gravity — an exact fit at both
+	// endpoints that still reads as a proper arc in between.
 	if (weaponId === 'mirv' && impacts.length > 1 && elapsedMs <= impactPhaseStart) {
 		const splitPoint = trajectory[trajectory.length - 1];
 		if (!splitPoint) return;
-		const fallProgress = (elapsedMs - PROJECTILE_ANIMATION_DURATION_MS) / MIRV_FALL_DURATION_MS;
-		const eased = fallProgress * fallProgress; // ease-in, reads as gravity taking over post-split
-		const { x: sx, y: sy } = worldToCanvas(splitPoint.x, splitPoint.y, viewport);
+		const tSec = Math.max(0, (elapsedMs - PROJECTILE_ANIMATION_DURATION_MS) / 1000);
+		const totalSec = MIRV_FALL_DURATION_MS / 1000;
 		for (const impact of impacts) {
-			const { x: ix, y: iy } = worldToCanvas(impact.x, impact.y, viewport);
-			const x = sx + (ix - sx) * eased;
-			const y = sy + (iy - sy) * eased;
+			const vx0 = (impact.x - splitPoint.x) / totalSec;
+			const vy0 = (impact.y - splitPoint.y - 0.5 * MIRV_FALL_GRAVITY * totalSec * totalSec) / totalSec;
+			const worldX = splitPoint.x + vx0 * tSec;
+			const worldY = splitPoint.y + vy0 * tSec + 0.5 * MIRV_FALL_GRAVITY * tSec * tSec;
+			const { x, y } = worldToCanvas(worldX, worldY, viewport);
 			ctx.beginPath();
 			ctx.fillStyle = '#222';
 			ctx.arc(x, y, 3, 0, Math.PI * 2);

@@ -226,16 +226,7 @@ public final class Match {
         String token = "tok-" + UUID.randomUUID();
         String color = COLORS[players.size() % COLORS.length];
         Player domainPlayer = new Player(playerId, displayName, color, STARTING_CASH, new Tank(0, 0, STARTING_HEALTH));
-        // M3 has no shop yet (M4): grant every player a full starting loadout
-        // (all 10 weapons at their PLAN.md 4.4 default quantities, plus 1 of
-        // each shield) so the whole roster is immediately testable without a
-        // shop. -1 conventionally means "unlimited" (basic_shell).
-        for (WeaponDef w : WeaponDef.all().values()) {
-            domainPlayer.loadout.put(w.weaponId(), w.defaultQty());
-        }
-        for (ShieldDef s : ShieldDef.all().values()) {
-            domainPlayer.loadout.put(s.shieldId(), 1);
-        }
+        resetLoadout(domainPlayer);
 
         MatchPlayer mp = new MatchPlayer(domainPlayer, token, sink);
         mp.isHost = players.isEmpty();
@@ -281,6 +272,75 @@ public final class Match {
         } else if (status == Status.IN_PROGRESS) {
             handleDisconnect(playerId);
         }
+    }
+
+    /**
+     * Grants a full starting loadout (all weapons at their PLAN.md 4.4
+     * default quantities, plus 1 of each shield) — shared by {@link
+     * #addPlayer} (a brand-new player) and {@link #rematch} (resetting an
+     * existing player for a new match). -1 conventionally means "unlimited"
+     * (basic_shell).
+     */
+    private static void resetLoadout(Player player) {
+        player.loadout.clear();
+        for (WeaponDef w : WeaponDef.all().values()) {
+            player.loadout.put(w.weaponId(), w.defaultQty());
+        }
+        for (ShieldDef s : ShieldDef.all().values()) {
+            player.loadout.put(s.shieldId(), 1);
+        }
+    }
+
+    /**
+     * Rematch (PLAN.md-adjacent, per live-playtest feedback: "Back to Start"
+     * previously stranded players at the menu, forcing a full re-login/
+     * match-creation cycle). Resets this same {@code Match} back to {@code
+     * WAITING} in place — same object, same live WebSocket connections, no
+     * re-authentication — so the existing lobby-ready flow ({@link
+     * #setReady}) can start a fresh match with the same roster. Valid only
+     * once the match has actually ended; any player may trigger it (no host
+     * gate, symmetric with {@link #setReady}); a second call once already
+     * {@code WAITING} is a harmless no-op.
+     */
+    public synchronized void rematch(String playerId) {
+        if (status != Status.COMPLETE) {
+            return;
+        }
+        MatchPlayer mp = players.get(playerId);
+        if (mp == null || mp.departed) {
+            return;
+        }
+
+        status = Status.WAITING;
+        roundNumber = 1;
+        turnsThisRound = 0;
+        turnOrder.clear();
+        shopReadyPlayerIds.clear();
+        shopStockRemaining.clear();
+
+        // Departed players are gone for good (no rejoin path exists for
+        // them) -- drop them entirely rather than carrying them into the
+        // new lobby. Still-connected/still-present players reset to a fresh
+        // starting state, same as a brand-new addPlayer.
+        players.values().removeIf(p -> p.departed);
+        boolean anyHost = false;
+        for (MatchPlayer p : players.values()) {
+            p.ready = false;
+            p.damageDealt = 0;
+            p.kills = 0;
+            p.player.cash = STARTING_CASH;
+            p.player.tank.health = STARTING_HEALTH;
+            p.player.tank.alive = true;
+            p.player.activeShieldId = null;
+            p.player.shieldAbsorbedSoFar = 0;
+            resetLoadout(p.player);
+            anyHost = anyHost || p.isHost;
+        }
+        if (!anyHost) {
+            players.values().stream().findFirst().ifPresent(p -> p.isHost = true);
+        }
+
+        broadcast("LobbyUpdate", buildLobbyUpdate());
     }
 
     private void reassignHostIfNeeded() {
@@ -912,15 +972,18 @@ public final class Match {
 
     // Risk/reward bonus for firing without Trajectory Help (user decision,
     // 2026-08-23: "if you choose NOT to use the trajectory help, your
-    // earnings are doubled and damage is 25% more"). Applied in
-    // applyDetonations to this shot's own blast/bounce damage and the cash
-    // earned from it — deliberately NOT applied to fall damage (an
-    // incidental terrain-collapse side effect, not something the shooter's
-    // aim choice caused). Since Trajectory Help is permanently unavailable
-    // for Nuke (see FireControls.svelte's trajectoryHelpUnavailable), every
-    // Nuke shot always gets this bonus (confirmed with the user).
-    private static final double NO_HELP_DAMAGE_MULTIPLIER = 1.25;
-    private static final double NO_HELP_CASH_MULTIPLIER = 2.0;
+    // earnings are +25%, damage unchanged"). Cash-only per user feedback
+    // 2026-08-24: the original design also boosted damage 25%, which
+    // compounded with the (then-2x) cash multiplier to an effective ~2.5x
+    // cash reward — reverted to a flat +25% cash bonus with no damage
+    // change. Applied in applyDetonations to the cash earned from this
+    // shot's own blast/bounce damage — deliberately NOT applied to fall
+    // damage (an incidental terrain-collapse side effect, not something the
+    // shooter's aim choice caused). Since Trajectory Help is permanently
+    // unavailable for Nuke (see FireControls.svelte's
+    // trajectoryHelpUnavailable), every Nuke shot always gets this bonus
+    // (confirmed with the user).
+    private static final double NO_HELP_CASH_MULTIPLIER = 1.25;
 
     // Tank-fall tuning (PLAN.md-adjacent, per live-playtest feedback): a
     // tank whose column's ground drops out from under it (crater, gully, or
@@ -1158,7 +1221,6 @@ public final class Match {
                                                      List<DetonationSpec> detonations,
                                                      List<double[]> bounceDamagePoints, double bounceDamagePerHit,
                                                      boolean trajectoryHelpUsed) {
-        double damageMultiplier = trajectoryHelpUsed ? 1.0 : NO_HELP_DAMAGE_MULTIPLIER;
         double cashMultiplier = trajectoryHelpUsed ? 1.0 : NO_HELP_CASH_MULTIPLIER;
         Map<String, Double> workingHealth = new LinkedHashMap<>();
         for (MatchPlayer p : players.values()) {
@@ -1186,7 +1248,6 @@ public final class Match {
         // all (only the health change), since bounce points are otherwise
         // added to `detonations` with centerDamage=0 (cosmetic skip-mark
         // only) and excluded from allImpacts on that basis.
-        double effectiveBounceDamagePerHit = bounceDamagePerHit * damageMultiplier;
         List<double[]> connectedBouncePoints = new ArrayList<>();
         for (double[] bp : bounceDamagePoints) {
             for (MatchPlayer p : players.values()) {
@@ -1197,7 +1258,7 @@ public final class Match {
                 if (distance(p.player.tank.x, p.player.tank.y, bp[0], bp[1]) > BOUNCE_DAMAGE_RADIUS) {
                     continue;
                 }
-                double mitigatedDamage = applyShieldMitigation(p, effectiveBounceDamagePerHit, true, cashEarned);
+                double mitigatedDamage = applyShieldMitigation(p, bounceDamagePerHit, true, cashEarned);
                 double newHealth = Math.max(0.0, Math.round(hp - mitigatedDamage));
                 boolean eliminated = newHealth <= 0.0;
                 workingHealth.put(p.player.playerId, newHealth);
@@ -1230,7 +1291,7 @@ public final class Match {
             }
 
             DamageCalculator.Outcome outcome = DamageCalculator.resolve(
-                    shooter.player.playerId, d.x(), d.y(), d.blastRadius(), d.centerDamage() * damageMultiplier, tankStates);
+                    shooter.player.playerId, d.x(), d.y(), d.blastRadius(), d.centerDamage(), tankStates);
 
             for (DamageCalculator.DamageResult dr : outcome.damageEvents) {
                 MatchPlayer target = players.get(dr.playerId());

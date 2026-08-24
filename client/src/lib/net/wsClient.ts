@@ -23,6 +23,14 @@ export type StateHandler = (state: ConnectionState) => void;
 const DEFAULT_URL: string = import.meta.env.VITE_SERVER_URL ?? 'ws://localhost:6154/ws';
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8000;
+// A dropped TCP connection (tab closed, network drop, laptop sleep) never
+// sends a WS close frame, so the server-side socket can sit in CLOSE_WAIT
+// forever (observed live on the deployed server -- see BrutalTankServer's
+// idle-reap task, which forcibly closes any connection silent past its own
+// threshold). This periodic Ping is what keeps a genuinely-alive
+// connection's PlayerSession.lastSeenAt fresh so the reaper doesn't treat
+// it as abandoned; well under the reaper's threshold.
+const PING_INTERVAL_MS = 20_000;
 
 export class WsClient {
 	private url: string;
@@ -30,6 +38,7 @@ export class WsClient {
 	private state: ConnectionState = 'closed';
 	private backoffMs = INITIAL_BACKOFF_MS;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private pingTimer: ReturnType<typeof setInterval> | null = null;
 	private shouldReconnect = true;
 
 	private messageHandlers = new Set<MessageHandler>();
@@ -50,6 +59,7 @@ export class WsClient {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+		this.stopPinging();
 		this.socket?.close();
 	}
 
@@ -89,6 +99,7 @@ export class WsClient {
 		socket.addEventListener('open', () => {
 			this.backoffMs = INITIAL_BACKOFF_MS;
 			this.setState('open');
+			this.startPinging();
 		});
 
 		socket.addEventListener('message', (event: MessageEvent) => {
@@ -98,6 +109,7 @@ export class WsClient {
 
 		socket.addEventListener('close', () => {
 			this.socket = null;
+			this.stopPinging();
 			if (this.shouldReconnect) {
 				this.setState('reconnecting');
 				this.scheduleReconnect();
@@ -109,6 +121,20 @@ export class WsClient {
 		socket.addEventListener('error', () => {
 			this.setState('error');
 		});
+	}
+
+	private startPinging(): void {
+		this.stopPinging();
+		this.pingTimer = setInterval(() => {
+			this.sendJson({ type: 'Ping', v: 1, payload: {} });
+		}, PING_INTERVAL_MS);
+	}
+
+	private stopPinging(): void {
+		if (this.pingTimer) {
+			clearInterval(this.pingTimer);
+			this.pingTimer = null;
+		}
 	}
 
 	private scheduleReconnect(): void {

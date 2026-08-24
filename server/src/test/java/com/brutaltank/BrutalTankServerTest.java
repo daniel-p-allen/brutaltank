@@ -55,6 +55,7 @@ class BrutalTankServerTest {
     private static final class TestClient {
         final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
         final WebSocket socket;
+        volatile boolean serverClosed = false;
         private final StringBuilder buffer = new StringBuilder();
 
         TestClient() throws Exception {
@@ -70,6 +71,12 @@ class BrutalTankServerTest {
                                 queue.add(full);
                             }
                             webSocket.request(1);
+                            return null;
+                        }
+
+                        @Override
+                        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+                            serverClosed = true;
                             return null;
                         }
                     })
@@ -133,6 +140,41 @@ class BrutalTankServerTest {
             assertEquals("Pong", node.get("type").asText());
             assertEquals("abc123", node.get("requestId").asText());
             assertTrue(node.get("payload").get("serverTimeMs").asLong() > 0);
+        } finally {
+            client.close();
+        }
+    }
+
+    /**
+     * Regression test for a real bug: a dropped TCP connection (tab closed,
+     * network drop, laptop sleep) never sends a WS close frame, so onClose
+     * never fires and the socket sits in CLOSE_WAIT indefinitely -- observed
+     * live on the deployed server. This can't cleanly simulate a genuinely
+     * dropped TCP connection over real localhost sockets, but it does prove
+     * the reap mechanism itself: a connection that goes quiet (no Ping, no
+     * other message) past the configured idle timeout gets forcibly closed
+     * server-side, which is the actual fix (wsClient.ts's periodic Ping is
+     * what keeps a real, still-alive connection from ever reaching this
+     * threshold in production).
+     */
+    @Test
+    @Timeout(15)
+    void idleConnectionIsForciblyClosedAfterGoingQuiet() throws Exception {
+        server.stop();
+        server = new BrutalTankServer(150, -1, 300, 100); // idleTimeoutMs=300, reapIntervalMs=100
+        server.start();
+
+        TestClient client = new TestClient();
+        try {
+            client.send("{\"type\":\"Ping\",\"v\":1,\"payload\":{}}");
+            client.awaitType("Pong", 2000); // confirm connected and touched
+
+            // Client deliberately sends nothing further past this point.
+            long deadline = System.currentTimeMillis() + 5000;
+            while (System.currentTimeMillis() < deadline && !client.serverClosed) {
+                Thread.sleep(20);
+            }
+            assertTrue(client.serverClosed, "idle connection should have been forcibly closed by the reaper");
         } finally {
             client.close();
         }
