@@ -13,9 +13,11 @@
 	// you should be able to play with your aim even when it's not your
 	// shot) — only the Fire button and weapon select are turn-gated.
 
+	import { onMount, onDestroy } from 'svelte';
 	import { sendFire } from '../../game/input/fireInput';
 	import { sendAimUpdate } from '../../game/input/aimInput';
 	import { sendTrajectoryHelpUpdate } from '../../game/input/trajectoryHelpInput';
+	import { attachKeyboardControls, detachKeyboardControls } from '../../game/input/keyboardInput';
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
 	import { aimStore } from '../../stores/aimStore';
@@ -63,6 +65,12 @@
 		if (fireDisabled) return;
 		sendFire($aimStore.angleDeg, $aimStore.power);
 	}
+
+	// A/D angle, W/S power, Space fire, 1-0 weapon select (per user request,
+	// 2026-08-24 follow-up) -- lives for as long as FireControls is mounted,
+	// same lifetime as the fire controls themselves.
+	onMount(attachKeyboardControls);
+	onDestroy(detachKeyboardControls);
 </script>
 
 <WeaponSelect disabled={disabled} />

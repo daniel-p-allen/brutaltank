@@ -173,16 +173,12 @@ re-researching:
   per this file's existing instruction — if one has a section the other
   doesn't, that's drift; fix it by copying, don't re-derive content.
 
-## Known open item: HUD/UI needs a real design pass
+## Closed item: HUD/UI visual overhaul — dropped 2026-08-24
 
-Flagged by the user via screenshot (2026-08-22) — the current HUD (weapon
-select, fire controls, shop, turn banner) is placeholder-quality:
-inconsistent button widths, inconsistent corner radii, weak visual
-hierarchy, no real design system. Filed in `PLAN.md`'s Future Ideas as
-"HUD/UI visual overhaul" — read that entry for the full scope (which
-components, what the user explicitly asked for: consistent widths, rounded
-edges, genre-appropriate design research first) before starting on it.
-Not started yet.
+Flagged by the user via screenshot (2026-08-22). A 3-direction mockup
+canvas was drafted (2026-08-23) and rejected by the user (2026-08-24:
+"Not liking those designs") — see `PLAN.md`'s Future Ideas entry. Do not
+revive those 3 directions if this is picked up again later; start fresh.
 
 ## 2026-08-24 session: live deploy stood up, HUD tweaks, instructions screen
 
