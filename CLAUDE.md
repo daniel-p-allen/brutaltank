@@ -324,3 +324,65 @@ both `server` (`./gradlew run`) and `client` (`npm run dev`), then retest.
 If either issue still reproduces after a genuine clean restart, it's a
 real regression in the fixes above and needs proper investigation — not
 yet confirmed either way.
+
+## 2026-08-24 session, part 3: keyboard controls, HUD mockups dropped, rematch/animation bugs closed
+
+Follow-up session. Three things:
+
+1. **Rematch flow + round-end animation timing bugs (part 2's "retest
+   pending" items) — treated as closed.** Rather than a live retest, this
+   was verified at the code/test level: the full client suite (`npm run
+   test`, 57/57) and full server suite (`./gradlew test --rerun`) both ran
+   clean from a cold state, including the regression tests added alongside
+   the `fc12b6d` fix commit (`MatchTurnStateMachineTest`,
+   `BrutalTankServerTest`, `ProjectileSimTest`, updated
+   `matchStore.test.ts`). A genuine live playtest is still the strongest
+   signal if one happens, but nothing points to a regression.
+
+2. **HUD redesign mockups dropped.** User reviewed the 3-direction canvas
+   from 2026-08-23 and rejected all three ("Not liking those designs").
+   Removed from `PLAN.md`'s Future Ideas, `docs/architecture.md`, and this
+   file's former "Known open item" section. Don't revive those 3
+   directions if a HUD pass comes up again — start fresh.
+
+3. **Keyboard controls added**: A/D angle, W/S power (smooth
+   `requestAnimationFrame` ramp while held), Spacebar fire, 1-9/0 select
+   the 10 hotbar weapons (`client/src/lib/game/input/keyboardInput.ts`,
+   wired into `FireControls.svelte`). **Found and fixed a real bug via a
+   scripted two-player browser test** (Playwright against the actual local
+   dev server, not mocks): `isTypingTarget()` originally treated *any*
+   `<input>` element as a "user is typing, suppress shortcuts" target —
+   but the angle/power sliders are themselves `<input type="range">`, and
+   dragging one (the most natural first action) kept focus there, silently
+   swallowing every subsequent keystroke. This was the literal cause of
+   "nothing to do with the keyboard is working" reported live. Fixed to
+   only treat real text-entry input types (text/number/email/etc.) plus
+   textareas/contenteditable as typing targets; range/checkbox/radio/button
+   inputs pass through. Regression test added
+   (`keyboardInput.test.ts`'s `isTypingTarget` describe block) pinning the
+   range-input case specifically.
+
+**Open, unreproduced report from this session: "both readied up, match
+stuck on lobby."** Live report from the user testing the deployed app
+(`brutaltank.vercel.app` client / `wss://brutaltank.aktiva.com.au` server)
+with two separate freshly-opened tabs (confirmed: not a duplicated tab, so
+not the `sessionStorage`-gets-copied-into-a-new-tab browser behavior that
+was the first hypothesis and was separately confirmed real via a
+`window.open`-from-opener repro — just not what happened here). Both
+players' names showed the "Ready" badge in the roster but the match never
+started. Investigated via 3 separate scripted two-player runs directly
+against the live deployed server (not local), including WebSocket-frame-
+level capture and human-realistic pacing (delays between join/ready,
+pausing on the instructions screen) — every run's `SetReady`/`SetReady`
+pair correctly produced a `MatchStarted` broadcast and both clients
+entered the match. `Match.setReady`'s `allReady` gate
+(`server/.../match/Match.java` ~line 239) requires `connectedCount >= 2`
+of currently-`connected` (not just non-departed) players — the leading
+theory if this reproduces again is that one player's server-side
+`connected` flag was somehow `false` at the moment the second SetReady
+landed (roster still *displays* a departed/disconnected player's stale
+`ready=true`, since `buildLobbyUpdate` doesn't filter on `connected` —
+only the `allReady` gate does), which would look exactly like this with no
+client-visible error. Not confirmed — asked the user to retry and, if it
+recurs, capture the match code + browser console output for a targeted
+look at that specific match's live state.
