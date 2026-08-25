@@ -58,19 +58,26 @@ export interface WeaponCatalogEntry {
 	 * info card). Shown on the hover info card only.
 	 */
 	price?: number;
+	/**
+	 * One short line of what the weapon actually does (2026-08-25 user
+	 * request: "1 very short line about what the weapon does" on the hover
+	 * info card). Shields don't need this — SHIELD_EFFECT_BLURB already
+	 * serves the same purpose for them.
+	 */
+	description?: string;
 }
 
 export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
-	{ id: 'basic_shell', label: 'Basic Shell', isShield: false, weightClass: 2, centerDamage: 50, blastRadius: 30, price: 0 },
-	{ id: 'baby_missile', label: 'Baby Missile', isShield: false, weightClass: 1, centerDamage: 36, blastRadius: 22, price: 200 },
-	{ id: 'heavy_cannonball', label: 'Heavy Cannonball', isShield: false, weightClass: 3, centerDamage: 60, blastRadius: 38, price: 150 },
-	{ id: 'mirv', label: 'MIRV', isShield: false, weightClass: 2, centerDamage: 30, blastRadius: 25, price: 300 },
-	{ id: 'napalm', label: 'Napalm', isShield: false, weightClass: 2, centerDamage: 40, blastRadius: 50, price: 250 },
-	{ id: 'tunneling_shot', label: 'Tunneling Shot', isShield: false, weightClass: 2, centerDamage: 60, blastRadius: 25, price: 200 },
-	{ id: 'bouncing_betty', label: 'Bouncing Betty', isShield: false, weightClass: 1, centerDamage: 50, blastRadius: 30, price: 220 },
-	{ id: 'cluster_bomb', label: 'Cluster Bomb', isShield: false, weightClass: 2, centerDamage: 80, blastRadius: 20, price: 280 },
-	{ id: 'digger', label: 'Digger', isShield: false, weightClass: 3, centerDamage: 20, blastRadius: 38, price: 120 },
-	{ id: 'nuke', label: 'Nuke', isShield: false, weightClass: 3, centerDamage: 190, blastRadius: 90, price: 600 },
+	{ id: 'basic_shell', label: 'Basic Shell', isShield: false, weightClass: 2, centerDamage: 50, blastRadius: 30, price: 0, description: 'Standard ballistic shot.' },
+	{ id: 'baby_missile', label: 'Baby Missile', isShield: false, weightClass: 1, centerDamage: 36, blastRadius: 22, price: 200, description: 'Flat, fast flight with slight terminal homing.' },
+	{ id: 'heavy_cannonball', label: 'Heavy Cannonball', isShield: false, weightClass: 3, centerDamage: 60, blastRadius: 38, price: 150, description: 'Slow arc, hits hard.' },
+	{ id: 'mirv', label: 'MIRV', isShield: false, weightClass: 2, centerDamage: 30, blastRadius: 25, price: 300, description: 'Splits into 3-5 bomblets at the peak of its arc.' },
+	{ id: 'napalm', label: 'Napalm', isShield: false, weightClass: 2, centerDamage: 40, blastRadius: 50, price: 250, description: 'Wide, fiery splash.' },
+	{ id: 'tunneling_shot', label: 'Tunneling Shot', isShield: false, weightClass: 2, centerDamage: 60, blastRadius: 25, price: 200, description: 'Burrows through terrain before detonating.' },
+	{ id: 'bouncing_betty', label: 'Bouncing Betty', isShield: false, weightClass: 1, centerDamage: 50, blastRadius: 30, price: 220, description: 'Skips along the ground, damaging each bounce.' },
+	{ id: 'cluster_bomb', label: 'Cluster Bomb', isShield: false, weightClass: 2, centerDamage: 80, blastRadius: 20, price: 280, description: 'Primary blast plus 4 sideways bomblets.' },
+	{ id: 'digger', label: 'Digger', isShield: false, weightClass: 3, centerDamage: 20, blastRadius: 38, price: 120, description: 'Tunnels a short distance, then a big final crater.' },
+	{ id: 'nuke', label: 'Nuke', isShield: false, weightClass: 3, centerDamage: 190, blastRadius: 90, price: 600, description: 'Massive blast radius and damage. Rare.' },
 	{ id: 'absorb_shield', label: 'Absorb Shield', isShield: true, price: 200 },
 	{ id: 'deflect_shield', label: 'Deflect Shield', isShield: true, price: 250 },
 	{ id: 'reflect_shield', label: 'Reflect Shield', isShield: true, price: 300 }

@@ -52,6 +52,21 @@
 			: 'Your Turn'
 		: 'BrutalTank';
 
+	// "Restart Session" (2026-08-25 user request): a break-glass recovery
+	// control, always reachable regardless of which screen is stuck --
+	// unlike PostMatchScreen's "Back to Start" (sendPlayAgain, a graceful
+	// server-side reset that only works once a match has actually
+	// COMPLETEd, and depends on the server cooperating), this is a pure
+	// client-side teardown that works even when something is genuinely
+	// broken: clears the persisted session (sessionStore's sessionStorage
+	// entry, so the next load doesn't attempt a Rejoin into whatever state
+	// broke) and reloads the page, landing cleanly on MenuScreen's
+	// enter-your-name screen every time.
+	function restartSession(): void {
+		sessionStore.clear();
+		window.location.reload();
+	}
+
 	// The server never actually sends a MatchStateSync (the only message that
 	// sets matchStore.status) while a match is WAITING — that status only
 	// becomes known client-side via LobbyUpdate, which populates lobbyStore
@@ -74,7 +89,10 @@
 <main>
 	<div class="game-frame" style="border-color: {localPlayerColor ?? '#444'}">
 		<h1 style={localPlayerColor ? `color: ${localPlayerColor}` : ''}>{headingText}</h1>
-		<ConnectionStatus />
+		<div class="status-row">
+			<ConnectionStatus />
+			<button type="button" class="restart-session" on:click={restartSession}>Restart Session</button>
+		</div>
 
 		{#if $connectionStore.status === 'open'}
 			{#if screen === 'menu'}
@@ -120,5 +138,31 @@
 
 	h1 {
 		margin: 0 0 1.5rem 0;
+	}
+
+	.status-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		width: 100%;
+		margin-bottom: 1rem;
+	}
+
+	/* Deliberately subtle -- a break-glass recovery control, not something
+	   that should draw attention during normal play. */
+	.restart-session {
+		padding: 0.2rem 0.6rem;
+		border: 1px solid #444;
+		border-radius: 6px;
+		background: transparent;
+		color: #777;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.restart-session:hover {
+		color: #ccc;
+		border-color: #777;
 	}
 </style>

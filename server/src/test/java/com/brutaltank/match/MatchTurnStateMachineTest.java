@@ -269,6 +269,46 @@ class MatchTurnStateMachineTest {
     }
 
     @Test
+    @Timeout(10)
+    void rematchReReadiesBotsButNotHumans() {
+        // Regression test for a real bug (filed and fixed 2026-08-25): bots
+        // auto-ready themselves once, in addBot() -- but rematch() didn't
+        // re-invoke that, so after a rematch bots reset to unready and stayed
+        // stuck there forever (no client of their own to click Ready again).
+        Match match = newMatch("m-rematch-3", 1, 8); // maxRounds = 1
+        match.setTurnTimeoutMs(30_000);
+        Joined p1 = join(match, "P1");
+        Match.JoinResult bot = match.addBot("Bot One", new BotProfile(
+                Difficulty.MEDIUM, 8, 10, true, 0.05, 0.6, 0.6, java.util.Map.of(), 0.4, 0.2));
+        assertTrue(bot.success());
+
+        // Bot is pre-readied; the match auto-starts on the human's Ready.
+        Match.ReadyResult readyResult = match.setReady(p1.playerId(), true);
+        assertTrue(readyResult.matchStarted());
+        assertEquals(Match.Status.IN_PROGRESS, match.status());
+
+        match.debugSetHealth(bot.playerId(), 0);
+        assertTrue(match.fire(p1.playerId(), "r1", "basic_shell", 45, 40).accepted());
+        assertEquals(Match.Status.COMPLETE, match.status());
+
+        match.rematch(p1.playerId());
+
+        var lobbyUpdate = p1.sink().lastPayloadOfType("LobbyUpdate");
+        assertNotNull(lobbyUpdate);
+        for (var playerNode : lobbyUpdate.get("players")) {
+            boolean isBot = playerNode.get("isBot").asBoolean();
+            assertEquals(isBot, playerNode.get("ready").asBoolean(),
+                    "bots should auto-ready again after a rematch; humans should not");
+        }
+
+        // The reset lobby is actually functional: the human readying alone
+        // (bot is already ready) should be enough to auto-start, same as the
+        // original match creation.
+        Match.ReadyResult secondReady = match.setReady(p1.playerId(), true);
+        assertTrue(secondReady.matchStarted(), "match should auto-start again since the bot is still ready");
+    }
+
+    @Test
     @Timeout(15)
     void sixtyTurnSafetyCapEndsRoundWithoutElimination() {
         Match match = newMatch("m-turn-6", 4, 8);

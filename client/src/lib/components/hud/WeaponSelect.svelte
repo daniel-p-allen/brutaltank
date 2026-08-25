@@ -66,40 +66,44 @@
 			{#if hoveredId === entry.id}
 				<div class="info-card">
 					<div class="info-title">{entry.label}</div>
-					{#if entry.centerDamage}
-						<div class="info-row">
-							<span class="info-label">Damage</span>
-							<span class="info-value">
-								<span
-									class="dmg-pie small"
-									style="background: {damagePieGradient(entry.centerDamage)}"
-								></span>
-								{entry.centerDamage}
-							</span>
-						</div>
+					{#if entry.description}
+						<div class="info-desc">{entry.description}</div>
+					{:else if entry.isShield && SHIELD_EFFECT_BLURB[entry.id]}
+						<div class="info-desc">{SHIELD_EFFECT_BLURB[entry.id]}</div>
 					{/if}
-					{#if entry.blastRadius}
-						<div class="info-row"><span class="info-label">Blast radius</span><span class="info-value">{entry.blastRadius}</span></div>
-					{/if}
-					{#if entry.weightClass}
-						<div class="info-row"><span class="info-label">Weight</span><span class="info-value weight">{'★'.repeat(entry.weightClass)}</span></div>
-					{/if}
-					{#if entry.isShield && SHIELD_EFFECT_BLURB[entry.id]}
-						<div class="info-row"><span class="info-label">Effect</span><span class="info-value">{SHIELD_EFFECT_BLURB[entry.id]}</span></div>
-					{/if}
-					{#if entry.price !== undefined}
-						<div class="info-row">
-							<span class="info-label">Price</span>
-							<span class="info-value">{entry.price === 0 ? 'Free' : `$${entry.price}`}</span>
-						</div>
-					{/if}
-					<div class="info-row"><span class="info-label">Owned</span><span class="info-value">{formatQuantity(qty)}</span></div>
-					{#if stockRemaining !== null}
-						<div class="info-row">
-							<span class="info-label">Shop stock</span>
-							<span class="info-value">{entry.id in stockRemaining ? stockRemaining[entry.id] : '—'}</span>
-						</div>
-					{/if}
+					<div class="info-stats">
+						{#if entry.centerDamage}
+							<div class="info-row">
+								<span class="info-label">Damage</span>
+								<span class="info-value">
+									<span
+										class="dmg-pie small"
+										style="background: {damagePieGradient(entry.centerDamage)}"
+									></span>
+									{entry.centerDamage}
+								</span>
+							</div>
+						{/if}
+						{#if entry.blastRadius}
+							<div class="info-row"><span class="info-label">Blast radius</span><span class="info-value">{entry.blastRadius}</span></div>
+						{/if}
+						{#if entry.weightClass}
+							<div class="info-row"><span class="info-label">Weight</span><span class="info-value weight">{'★'.repeat(entry.weightClass)}</span></div>
+						{/if}
+						{#if entry.price !== undefined}
+							<div class="info-row">
+								<span class="info-label">Price</span>
+								<span class="info-value">{entry.price === 0 ? 'Free' : `$${entry.price}`}</span>
+							</div>
+						{/if}
+						<div class="info-row"><span class="info-label">Owned</span><span class="info-value">{formatQuantity(qty)}</span></div>
+						{#if stockRemaining !== null}
+							<div class="info-row">
+								<span class="info-label">Shop stock</span>
+								<span class="info-value">{entry.id in stockRemaining ? stockRemaining[entry.id] : '—'}</span>
+							</div>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -206,11 +210,12 @@
 		left: 50%;
 		transform: translateX(-50%);
 		min-width: 11rem;
+		max-width: 14rem;
 		background: #17191f;
 		border: 1px solid #555;
 		border-radius: 6px;
-		padding: 0.5rem 0.65rem;
-		font-size: 0.72rem;
+		padding: 0.45rem 0.6rem;
+		font-size: 0.7rem;
 		color: #eee;
 		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
 		z-index: 20;
@@ -219,8 +224,30 @@
 
 	.info-title {
 		font-weight: 600;
-		margin-bottom: 0.3rem;
 		white-space: nowrap;
+	}
+
+	/* One-line "what it does" caption (2026-08-25 user request) -- styled as
+	   a caption, not another stat row, so it reads distinctly from the
+	   dense label/value list below it. */
+	.info-desc {
+		color: #9aa4b5;
+		font-style: italic;
+		line-height: 1.25;
+		margin: 0.15rem 0 0.35rem;
+		padding-bottom: 0.3rem;
+		border-bottom: 1px solid #2c3341;
+	}
+
+	/* Tighter than a default line-height stack (2026-08-25 user request:
+	   "stats closer together so they take up less real estate") -- rows sit
+	   almost flush, divided only by the label/value contrast itself rather
+	   than whitespace, without feeling cramped since font-size/padding on
+	   .info-card above were trimmed to match. */
+	.info-stats {
+		display: flex;
+		flex-direction: column;
+		gap: 0.02rem;
 	}
 
 	.info-row {
@@ -228,7 +255,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
-		padding: 0.08rem 0;
+		line-height: 1.5;
 	}
 
 	.info-label {

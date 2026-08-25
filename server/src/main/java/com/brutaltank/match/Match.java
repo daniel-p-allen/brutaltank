@@ -372,7 +372,13 @@ public final class Match {
         players.values().removeIf(p -> p.departed);
         boolean anyHost = false;
         for (MatchPlayer p : players.values()) {
-            p.ready = false;
+            // Bots auto-ready themselves once, in addBot() -- but rematch()
+            // doesn't call addBot() again (the bots already exist), so
+            // without this they'd reset to unready and stay stuck there
+            // forever, since a bot has no client to click Ready itself
+            // (bug filed 2026-08-25, fixed same day). Mirrors addBot()'s own
+            // setReady(bot, true) call.
+            p.ready = p.isBot;
             p.damageDealt = 0;
             p.kills = 0;
             p.player.cash = STARTING_CASH;
