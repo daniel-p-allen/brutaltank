@@ -7,20 +7,14 @@
 
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
-	import {
-		weaponSelectStore,
-		WEAPON_CATALOG,
-		formatQuantity,
-		hasAmmo,
-		damagePieGradient,
-		SHIELD_EFFECT_BLURB
-	} from '../../stores/weaponSelectStore';
+	import { weaponSelectStore, WEAPON_CATALOG, formatQuantity, hasAmmo, damagePieGradient } from '../../stores/weaponSelectStore';
+	import WeaponInfoCard from './WeaponInfoCard.svelte';
 
 	export let disabled = false;
 
 	$: localPlayer = $matchStore.players.find((p) => p.playerId === $sessionStore.playerId);
 	$: loadout = localPlayer?.loadout ?? {};
-	$: stockRemaining = $matchStore.shop?.stockRemaining ?? null;
+	$: shopStock = $matchStore.shop?.stockRemaining ?? null;
 
 	// Hover-card state (2026-08-25 user request: "I like the hover idea...
 	// let's try it" -- a per-weapon detail popup, no new page/button needed).
@@ -64,47 +58,7 @@
 			</button>
 
 			{#if hoveredId === entry.id}
-				<div class="info-card">
-					<div class="info-title">{entry.label}</div>
-					{#if entry.description}
-						<div class="info-desc">{entry.description}</div>
-					{:else if entry.isShield && SHIELD_EFFECT_BLURB[entry.id]}
-						<div class="info-desc">{SHIELD_EFFECT_BLURB[entry.id]}</div>
-					{/if}
-					<div class="info-stats">
-						{#if entry.centerDamage}
-							<div class="info-row">
-								<span class="info-label">Damage</span>
-								<span class="info-value">
-									<span
-										class="dmg-pie small"
-										style="background: {damagePieGradient(entry.centerDamage)}"
-									></span>
-									{entry.centerDamage}
-								</span>
-							</div>
-						{/if}
-						{#if entry.blastRadius}
-							<div class="info-row"><span class="info-label">Blast radius</span><span class="info-value">{entry.blastRadius}</span></div>
-						{/if}
-						{#if entry.weightClass}
-							<div class="info-row"><span class="info-label">Weight</span><span class="info-value weight">{'★'.repeat(entry.weightClass)}</span></div>
-						{/if}
-						{#if entry.price !== undefined}
-							<div class="info-row">
-								<span class="info-label">Price</span>
-								<span class="info-value">{entry.price === 0 ? 'Free' : `$${entry.price}`}</span>
-							</div>
-						{/if}
-						<div class="info-row"><span class="info-label">Owned</span><span class="info-value">{formatQuantity(qty)}</span></div>
-						{#if stockRemaining !== null}
-							<div class="info-row">
-								<span class="info-label">Shop stock</span>
-								<span class="info-value">{entry.id in stockRemaining ? stockRemaining[entry.id] : '—'}</span>
-							</div>
-						{/if}
-					</div>
-				</div>
+				<WeaponInfoCard {entry} owned={qty} stockRemaining={shopStock !== null ? (shopStock[entry.id] ?? 0) : null} />
 			{/if}
 		</div>
 	{/each}
@@ -198,87 +152,5 @@
 		font-size: 0.7rem;
 		letter-spacing: 0.05em;
 		color: #e0a020;
-	}
-
-	/* Hover info card (2026-08-25 user request). Positioned above the chip
-	   so it never collides with the fire controls typically below the
-	   hotbar; pointer-events: none so it can never itself become the hover
-	   target and flicker the card open/closed. */
-	.info-card {
-		position: absolute;
-		bottom: calc(100% + 8px);
-		left: 50%;
-		transform: translateX(-50%);
-		min-width: 11rem;
-		max-width: 14rem;
-		background: #17191f;
-		border: 1px solid #555;
-		border-radius: 6px;
-		padding: 0.45rem 0.6rem;
-		font-size: 0.7rem;
-		color: #eee;
-		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-		z-index: 20;
-		pointer-events: none;
-	}
-
-	.info-title {
-		font-weight: 600;
-		white-space: nowrap;
-	}
-
-	/* One-line "what it does" caption (2026-08-25 user request) -- styled as
-	   a caption, not another stat row, so it reads distinctly from the
-	   dense label/value list below it. */
-	.info-desc {
-		color: #9aa4b5;
-		font-style: italic;
-		line-height: 1.25;
-		margin: 0.15rem 0 0.35rem;
-		padding-bottom: 0.3rem;
-		border-bottom: 1px solid #2c3341;
-	}
-
-	/* Tighter than a default line-height stack (2026-08-25 user request:
-	   "stats closer together so they take up less real estate") -- rows sit
-	   almost flush, divided only by the label/value contrast itself rather
-	   than whitespace, without feeling cramped since font-size/padding on
-	   .info-card above were trimmed to match. */
-	.info-stats {
-		display: flex;
-		flex-direction: column;
-		gap: 0.02rem;
-	}
-
-	.info-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-		line-height: 1.5;
-	}
-
-	.info-label {
-		color: #999;
-	}
-
-	.info-value {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		font-family: monospace;
-	}
-
-	.info-value.weight {
-		font-family: inherit;
-		color: #e0a020;
-	}
-
-	.dmg-pie.small {
-		position: static;
-		width: 10px;
-		height: 10px;
-		border: none;
-		box-shadow: none;
 	}
 </style>

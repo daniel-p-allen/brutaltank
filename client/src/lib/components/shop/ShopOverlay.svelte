@@ -45,6 +45,7 @@
 
 	$: shop = $matchStore.shop;
 	$: localPlayer = $matchStore.players.find((p) => p.playerId === $sessionStore.playerId);
+	$: loadout = localPlayer?.loadout ?? {};
 	$: remainingSec = shop ? Math.max(0, Math.ceil(shop.timeoutSec - (now - shop.openedAtMs) / 1000)) : 0;
 	$: entries = shop
 		? shop.priceList.map((e) => ({ ...e, stock: shop.stockRemaining[e.itemId] ?? e.stock }))
@@ -72,7 +73,12 @@
 			<h4>Weapons</h4>
 			<div class="grid">
 				{#each weapons as entry (entry.itemId)}
-					<ShopItemCard {entry} label={LABEL_BY_ID.get(entry.itemId) ?? entry.itemId} cash={localPlayer?.cash ?? 0} />
+					<ShopItemCard
+						{entry}
+						label={LABEL_BY_ID.get(entry.itemId) ?? entry.itemId}
+						cash={localPlayer?.cash ?? 0}
+						owned={loadout[entry.itemId]}
+					/>
 				{/each}
 			</div>
 		</div>
@@ -86,6 +92,7 @@
 						label={LABEL_BY_ID.get(entry.itemId) ?? entry.itemId}
 						description={SHIELD_BLURB_BY_ID[entry.itemId]}
 						cash={localPlayer?.cash ?? 0}
+						owned={loadout[entry.itemId]}
 					/>
 				{/each}
 			</div>

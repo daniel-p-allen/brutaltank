@@ -6,6 +6,8 @@
 
 	import type { PriceListEntry } from '../../protocol/types';
 	import { sendShopPurchase } from '../../game/input/shopInput';
+	import { WEAPON_CATALOG } from '../../stores/weaponSelectStore';
+	import WeaponInfoCard from '../hud/WeaponInfoCard.svelte';
 
 	export let entry: PriceListEntry;
 	export let label: string;
@@ -13,6 +15,18 @@
 	// Two-word "what it does" blurb, shields only (ShopOverlay's
 	// SHIELD_BLURB_BY_ID) -- weapons pass nothing.
 	export let description: string | undefined = undefined;
+	/** Player's current owned quantity, for the hover info card's "Owned" row. */
+	export let owned: number | undefined = undefined;
+
+	// Hover info card (2026-08-25 user request: "those hover info cards for
+	// weapons need to be available in the shop as well") -- same
+	// WeaponInfoCard component and WEAPON_CATALOG data the hotbar's
+	// WeaponSelect.svelte uses, so the shop and the hotbar show identical
+	// info for the same weapon. Price/stock are already always-visible on
+	// this card's own body, so the hover card hides those rows (showPrice
+	// false, stockRemaining omitted) to avoid showing the same number twice.
+	$: catalogEntry = WEAPON_CATALOG.find((w) => w.id === entry.itemId);
+	let hovered = false;
 
 	let quantity = 1;
 
@@ -27,7 +41,15 @@
 	}
 </script>
 
-<div class="card" class:shield={entry.itemType === 'SHIELD'} class:out-of-stock={outOfStock}>
+<div
+	class="card"
+	class:shield={entry.itemType === 'SHIELD'}
+	class:out-of-stock={outOfStock}
+	role="group"
+	aria-label="{label} details"
+	on:mouseenter={() => (hovered = true)}
+	on:mouseleave={() => (hovered = false)}
+>
 	<div class="header">
 		<span class="label">{label}</span>
 		<span class="price">${entry.price}</span>
@@ -46,10 +68,15 @@
 		/>
 		<button type="button" on:click={buy} disabled={!canBuy}>Buy (${totalCost})</button>
 	</div>
+
+	{#if hovered && catalogEntry}
+		<WeaponInfoCard entry={catalogEntry} {owned} stockRemaining={null} showPrice={false} />
+	{/if}
 </div>
 
 <style>
 	.card {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: 0.3rem;
