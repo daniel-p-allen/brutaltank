@@ -1,0 +1,200 @@
+classDiagram
+    direction TB
+
+    class App {
+        <<component>>
+        +screen : Screen
+        +localPlayerColor : string
+        +isYourTurn : boolean
+        +headingText : string
+    }
+
+    class MenuScreen {
+        <<component>>
+        -displayName : string
+        -botCount : number
+        -botDifficulty : string
+        +createMatch() void
+        +joinMatch() void
+    }
+
+    class LobbyScreen {
+        <<component>>
+        -ready : boolean
+        -showInstructions : boolean
+        +toggleReady() void
+    }
+
+    class MatchScreen {
+        <<component>>
+        +rankedPlayers : Player[]
+        +winnerFlashing : boolean
+    }
+
+    class PostMatchScreen {
+        <<component>>
+        +backToStart() void
+    }
+
+    class GameCanvas {
+        <<component>>
+        -rafHandle : number
+        +draw() void
+    }
+
+    class FireControls {
+        <<component>>
+        +fireDisabled : boolean
+        +fire() void
+    }
+
+    class WeaponSelect {
+        <<component>>
+        +disabled : boolean
+    }
+
+    class ShopOverlay {
+        <<component>>
+        +entries : PriceListEntry[]
+        +continueClicked() void
+    }
+
+    class ShopItemCard {
+        <<component>>
+        +entry : PriceListEntry
+        +label : string
+        +buy() void
+    }
+
+    class wsClient {
+        <<singleton>>
+        -ws : WebSocket
+        -reconnectAttempts : number
+        +connect() void
+        +sendJson(envelope) void
+        +onMessage(handler) void
+    }
+
+    class matchStore {
+        <<writable store>>
+        +status : string
+        +players : Player[]
+        +terrain : Terrain
+        +shop : ShopState
+        +remoteAim : Record
+        +remoteTrajectoryHelp : Record
+        +markFireSent() void
+        +reset() void
+    }
+
+    class lobbyStore {
+        <<writable store>>
+        +matchId : string
+        +players : LobbyPlayer[]
+        +hostId : string
+    }
+
+    class sessionStore {
+        <<writable store>>
+        +playerId : string
+        +playerToken : string
+    }
+
+    class connectionStore {
+        <<writable store>>
+        +status : string
+        +latencyMs : number
+    }
+
+    class aimStore {
+        <<writable store>>
+        +angleDeg : number
+        +power : number
+    }
+
+    class weaponSelectStore {
+        <<writable store>>
+        +selected : string
+        +hasAmmo(qty) boolean$
+        +formatQuantity(qty) string$
+    }
+
+    class shotAnimationStore {
+        <<writable store>>
+        +pendingShotAnimation : PendingShotAnimation
+    }
+
+    class trajectoryHelpStore {
+        <<writable store>>
+        +enabled : boolean
+    }
+
+    class keyboardInput {
+        <<module>>
+        +attachKeyboardControls() void
+        +detachKeyboardControls() void
+        +isTypingTarget(target) boolean
+    }
+
+    class Player {
+        <<interface>>
+        +playerId : string
+        +displayName : string
+        +cash : number
+        +loadout : Record
+        +activeShieldId : string
+        +tank : Tank
+        +isBot : boolean
+    }
+
+    class Tank {
+        <<interface>>
+        +x : number
+        +y : number
+        +health : number
+        +alive : boolean
+    }
+
+    class MatchConfig {
+        <<interface>>
+        +maxRounds : number
+        +maxPlayers : number
+        +botCount : number
+        +botDifficulty : string
+    }
+
+    App "1" *-- "1" MenuScreen
+    App "1" *-- "1" LobbyScreen
+    App "1" *-- "1" MatchScreen
+    App "1" *-- "1" PostMatchScreen
+    MatchScreen "1" *-- "1" GameCanvas
+    MatchScreen "1" *-- "1" FireControls
+    MatchScreen "1" *-- "0..1" ShopOverlay
+    FireControls "1" *-- "1" WeaponSelect
+    ShopOverlay "1" *-- "*" ShopItemCard
+    FireControls "1" o-- "1" keyboardInput
+
+    App ..> matchStore : reads
+    App ..> lobbyStore : reads
+    MenuScreen ..> wsClient : sendCreateMatch
+    LobbyScreen ..> lobbyStore : reads
+    LobbyScreen ..> sessionStore : reads
+    GameCanvas ..> matchStore : reads
+    GameCanvas ..> shotAnimationStore : reads
+    GameCanvas ..> sessionStore : reads
+    GameCanvas ..> aimStore : reads
+    FireControls ..> aimStore : reads/writes
+    FireControls ..> weaponSelectStore : reads/writes
+    FireControls ..> trajectoryHelpStore : reads/writes
+    FireControls ..> wsClient : sendFire and sendAimUpdate
+    ShopOverlay ..> matchStore : reads shop
+    ShopItemCard ..> wsClient : sendShopPurchase
+
+    matchStore ..> wsClient : onMessage
+    lobbyStore ..> wsClient : onMessage
+    connectionStore ..> wsClient : onMessage
+    sessionStore ..> wsClient : onMessage
+
+    matchStore "1" --> "*" Player
+    Player "1" *-- "1" Tank
+    matchStore ..> MatchConfig : MatchStarted payload

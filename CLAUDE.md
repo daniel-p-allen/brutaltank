@@ -672,3 +672,35 @@ neither built:
   preview almost certainly doesn't model homing either, and a live target
   within homing range during descent could pull the real shot short
   independent of wind. Needs real investigation next time, not fixed.
+
+## 2026-08-25 session part 5: real UML diagrams, one more filed bug
+
+The blueprint canvas from part 3 was a stylized architecture diagram, not
+actual UML — the user asked directly ("do you know what a UML is") and then
+asked for real UML class diagrams (server + client), full current state,
+as a hi-res PNG. Built with **Mermaid's `classDiagram` syntax** (genuine
+UML notation: composition/aggregation/dependency arrows with correct
+semantics, `+`/`-` visibility, `«stereotype»` tags, multiplicities,
+underlined static members) rather than hand-drawn boxes — this is the
+right tool when the ask is specifically "proper UML," not just
+"looks like a diagram." Rendered via a local headless Chromium loading
+Mermaid from a CDN (`mermaid.render()` called directly, not the
+`startOnLoad`+`<pre class="mermaid">` auto-detect path — that path
+silently failed with "Syntax error in text" even on source that
+`mermaid.parse()` confirmed was valid; calling `render()` directly worked
+first try once switched). Saved to **`docs/uml/server.mmd`** /
+**`docs/uml/client.mmd`** (editable source) and **`docs/uml/server.png`**
+/ **`docs/uml/client.png`** (2532×2100 / 2802×1536, sent to the user
+directly too) — learned from the part-3 gap, saved into the repo this
+time without having to be asked twice.
+
+Also logged one more bug reported mid-session, filed not fixed: a
+shallow-angle tunneling shot (Digger/Tunneling Shot) can carve a trench
+across almost the entire map — `ProjectileSim`'s penetration cap
+(`TUNNELING_MAX_PENETRATION`/`DIGGER_MAX_PENETRATION`) only limits
+**cumulative vertical depth**, not horizontal distance or total path
+length, so a near-horizontal entry angle accumulates depth very slowly
+while still tunneling most of the map's width before the cap ever fires.
+User's own diagnosis, matches the code shape closely — fairly confident
+theory, not yet confirmed against the code by a targeted test. See
+`PLAN.md`'s Future Ideas for the full write-up.

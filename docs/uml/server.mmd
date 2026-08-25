@@ -1,0 +1,274 @@
+classDiagram
+    direction TB
+
+    class BrutalTankServer {
+        -Undertow server
+        -ObjectMapper mapper
+        -MatchRegistry matchRegistry
+        -LobbyManager lobbyManager
+        -Map~WebSocketChannel,PlayerSession~ sessions
+        -ScheduledExecutorService scheduler
+        +start() void
+        -handleMessage(session, sink, envelope) void
+        -handleFire(session, sink, envelope, payload) void
+        -handleShopPurchase(session, sink, envelope, payload) void
+        -reapIdleConnections() void
+    }
+
+    class LobbyManager {
+        -MatchRegistry registry
+        -ObjectMapper mapper
+        -ScheduledExecutorService scheduler
+        +handleCreateMatch(session, sink, requestId, payload) void
+        +handleJoinMatch(session, sink, requestId, payload) void
+        +handleSetReady(session, requestId, sink, ready) void
+        +handleRejoin(session, sink, requestId, payload) void
+        +handleLeaveMatch(session) void
+        +handlePlayAgain(session) void
+        -spawnBots(match, botCount, difficulty) void
+    }
+
+    class MatchRegistry {
+        -Map~String,Match~ matches
+        +put(match) void
+        +get(matchId) Match
+        +remove(matchId) void
+        +all() Collection~Match~
+    }
+
+    class PlayerSession {
+        +String sessionId
+        +MessageSink sink
+        +String playerId
+        +String currentMatchId
+        +String playerToken
+        +boolean connected
+        +long lastSeenAt
+        +touch() void
+    }
+
+    class MessageSink {
+        <<interface>>
+        +send(json) void
+        +isOpen() boolean
+    }
+
+    class Match {
+        +String matchId
+        +String joinCode
+        -Status status
+        -Map~String,MatchPlayer~ players
+        -List~String~ turnOrder
+        -Terrain terrain
+        -int windStrength
+        -Map~String,Integer~ shopStockRemaining
+        -BotController botController
+        +addPlayer(displayName, sink) JoinResult
+        +addBot(displayName, profile) JoinResult
+        +setReady(playerId, ready) ReadyResult
+        +fire(playerId, requestId, weaponId, angle, power, help) FireOutcome
+        +purchase(playerId, itemId, itemType, qty) PurchaseOutcome
+        +shopContinue(playerId) void
+        +updateAim(playerId, angle) void
+        +rematch(playerId) void
+        +handleDisconnect(playerId) void
+        +rejoin(playerToken, sink) RejoinResult
+        -beginTurn() void
+        -resolveShot(shooter, weaponId, angle, power, help) ShotResolved
+        -endRound(aliveIds) void
+        -openShop() void
+        +buildStateSync() MatchStateSync
+    }
+
+    class MatchPlayer {
+        <<nested in Match>>
+        +Player player
+        +String playerToken
+        +MessageSink sink
+        +boolean connected
+        +boolean ready
+        +boolean isHost
+        +boolean departed
+        +boolean isBot
+        +int damageDealt
+        +int kills
+    }
+
+    class MatchConfig {
+        <<record>>
+        +int maxRounds
+        +int maxPlayers
+        +int botCount
+        +Difficulty botDifficulty
+        +defaultConfig() MatchConfig$
+        +fromDto(dto) MatchConfig$
+    }
+
+    class Difficulty {
+        <<enumeration>>
+        EASY
+        MEDIUM
+        HARD
+        MIXED
+        +fromString(s) Difficulty$
+    }
+
+    class Player {
+        +String playerId
+        +String displayName
+        +String color
+        +int cash
+        +Map~String,Integer~ loadout
+        +String activeShieldId
+        +double shieldAbsorbedSoFar
+        +Tank tank
+    }
+
+    class Tank {
+        +double x
+        +double y
+        +double health
+        +boolean alive
+    }
+
+    class Terrain {
+        -int[] heights
+        +width() int
+        +heightAt(x) int
+        +applyCrater(x, radius, depthMult) CraterResult
+        +carveTunnelSegment(x, targetY, radius) CraterResult
+        +settleSlopes(startX, endX) int[]
+    }
+
+    class TerrainGenerator {
+        <<utility>>
+        +generate(seed, width, spawnXs) Terrain$
+    }
+
+    class WeaponDef {
+        <<record>>
+        +String weaponId
+        +Behavior behavior
+        +double blastRadius
+        +double centerDamage
+        +int price
+        +int defaultQty
+        +double powerScaleMultiplier
+        +double gravityMultiplier
+        +int shopStock
+        +double homingStrength
+        +byId(id) WeaponDef$
+        +all() Map~String,WeaponDef~$
+    }
+
+    class Behavior {
+        <<enumeration>>
+        STANDARD
+        DIGGER
+        TUNNELING
+        BOUNCING
+        MIRV
+        CLUSTER
+    }
+
+    class ShieldDef {
+        <<record>>
+        +String shieldId
+        +double damageMultiplier
+        +int price
+        +int shopStock
+        +byId(id) ShieldDef$
+        +isShieldId(id) boolean$
+    }
+
+    class ProjectileSim {
+        <<utility>>
+        +double GRAVITY$
+        +double POWER_SCALE$
+        +double WIND_ACCEL_PER_STRENGTH$
+        +simulate(x, y, angle, power, wind, terrain, targets, behavior) Result$
+    }
+
+    class DamageCalculator {
+        <<utility>>
+        +resolve(shooterId, x, y, radius, dmg, tankStates) Outcome$
+    }
+
+    class BotController {
+        -Match match
+        -ScheduledExecutorService scheduler
+        -Map~String,BotProfile~ bots
+        +registerBot(playerId, profile) void
+        +onTurnStarted(activePlayerId, turnToken) void
+        +onShopOpened(shopToken) void
+        -takeTurn(playerId, profile, token) void
+        -takeShopTurn(playerId, profile, token) void
+    }
+
+    class BotProfile {
+        <<record>>
+        +Difficulty difficulty
+        +double maxAngleErrorDeg
+        +double maxPowerError
+        +boolean windAware
+        +double wildMissChance
+        +double moneySense
+        +double valueAwareness
+        +Map~String,Double~ weaponPreference
+        +double shieldCaution
+        +double targetFocus
+        +forDifficulty(d, rng) BotProfile$
+    }
+
+    class BotAimPlanner {
+        <<utility>>
+        +plan(terrain, self, opponents, wind, loadout, profile, rng) Plan$
+    }
+
+    class BotShopPlanner {
+        <<utility>>
+        +plan(priceList, cash, profile, rng) List~Purchase~$
+    }
+
+    class Payloads {
+        <<DTO records, 20+ total>>
+        +MatchStateSync
+        +ShotResolved
+        +TurnStarted
+        +ShopOpened
+        +LobbyUpdate
+        +etc()
+    }
+
+    BrutalTankServer "1" o-- "*" PlayerSession
+    BrutalTankServer "1" *-- "1" LobbyManager
+    BrutalTankServer "1" *-- "1" MatchRegistry
+    BrutalTankServer ..> Payloads : builds
+    PlayerSession "1" --> "1" MessageSink
+    LobbyManager ..> MatchRegistry : routes via
+    LobbyManager ..> Match : creates and routes
+    MatchRegistry "1" o-- "*" Match
+
+    Match "1" *-- "2..8" MatchPlayer
+    Match "1" --> "1" MatchConfig
+    Match "1" *-- "1" Terrain
+    Match ..> TerrainGenerator : creates
+    Match "1" o-- "0..1" BotController
+    Match ..> WeaponDef : byId
+    Match ..> ShieldDef : byId
+    Match ..> ProjectileSim : simulate
+    Match ..> DamageCalculator : resolve
+    Match ..> Payloads : builds
+
+    MatchPlayer "1" *-- "1" Player
+    MatchPlayer "1" --> "0..1" MessageSink
+    Player "1" *-- "1" Tank
+    MatchConfig "1" --> "1" Difficulty
+    WeaponDef "1" --> "1" Behavior
+
+    BotController "1" o-- "*" BotProfile
+    BotController ..> BotAimPlanner : uses
+    BotController ..> BotShopPlanner : uses
+    BotController ..> Match : drives turn and shop
+    BotProfile "1" --> "1" Difficulty
+    BotAimPlanner ..> ProjectileSim : simulate
