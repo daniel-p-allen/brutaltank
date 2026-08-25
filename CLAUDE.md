@@ -634,6 +634,26 @@ only their *text* hidden (`visibility:hidden` on the `<h4>`/`<p>`, not the
 container), so they rendered as visible empty boxes — fixed by removing
 them instead of trying to hide a whole box that didn't need to exist.
 
+**Follow-up, same session: the diagram was only a web link, not an
+in-repo file — user caught this.** Asked directly whether it was saved to
+`docs/` and whether it had been exported to PDF and checked; the honest
+answer to both was no. Fixed properly rather than just answering the
+question: the design canvas's own "Export PDF" control wasn't reachable
+from an unauthenticated local preview (needs the real claude.ai session),
+so instead exported each of the 8 pages as a PNG via the canvas's
+per-artboard "Export artboard" menu (Playwright driving the local seeded
+`.html`, capturing each real download), assembled them into one real
+multi-page PDF myself (`page.pdf()` on a small wrapper HTML, one page per
+image, 1360×900 to match the artboards exactly), and verified the result
+mechanically (8 `/Type /Page` objects, matching file size) since no
+`pdftoppm`/poppler is installed on this machine for the usual PDF-render
+check. Saved over the stale `docs/brutaltank-blueprint.pdf`. The live
+Claude Design canvas link stays the editable "source" version; this PDF
+is the static in-repo snapshot, same relationship the old PDF had to
+nothing (it was hand-generated once, this one now has a documented
+regeneration path if it goes stale again: re-seed the canvas from
+`PLAN.md`, export each artboard as PNG 2×, wrap in HTML, `page.pdf()`).
+
 Two more items surfaced by the user mid-session, both filed in `PLAN.md`,
 neither built:
 - **Connection/access log for troubleshooting at scale** — every join
