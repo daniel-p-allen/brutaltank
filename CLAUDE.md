@@ -728,3 +728,74 @@ while still tunneling most of the map's width before the cap ever fires.
 User's own diagnosis, matches the code shape closely — fairly confident
 theory, not yet confirmed against the code by a targeted test. See
 `PLAN.md`'s Future Ideas for the full write-up.
+
+## 2026-08-25 session, later: PLAN_ARCHIVE.md split off, damage pie + hover
+info card shipped (hotbar and shop), two bugs fixed, round count changed
+
+A separate, later continuation of the same day. Two structural/doc changes
+plus four real shipped pieces of work; full detail for everything below
+lives in `PLAN_ARCHIVE.md` now (see the note at the top of this file's
+"Where the plan lives" section) — this is a short pointer, not a
+duplicate of that detail.
+
+**Docs restructuring**: `PLAN.md`'s "Future ideas" backlog had grown to
+mix genuinely open work with a long tail of completed items, making it
+hard to scan. Split every completed bug/feature/decision (verbatim, with
+original root-cause detail intact) into a new **`PLAN_ARCHIVE.md`**,
+leaving `PLAN.md` with only open work. Per explicit user instruction, this
+archive is **not** read proactively at the start of future sessions —
+only on request or when hunting for something known to exist but not
+found elsewhere (see the `feedback_dont_proactively_read_plan_archive`
+memory).
+
+**Shipped, in order**:
+1. **Graphical weapon damage rating (a gradient pie)** on every hotbar
+   chip — a small radial pie sampling a *fixed* color wheel (1 o'clock =
+   yellow, 6 o'clock = orange, 12 o'clock/full lap = red); each weapon
+   reveals only the wedge up to its own damage fraction of Nuke (the
+   roster max, 190). Real back-and-forth was needed on the underlying
+   *numbers* for multi-impact weapons — MIRV's `centerDamage` is already
+   per-child (no change needed), but Cluster Bomb's is per detonation
+   point (1 primary + 4 bomblets, all the same value) and is rated as 2
+   realistic hits (40×2=80), not the raw 40 or the 5-point sum of 200,
+   per the user's own framing ("cluster, two might hit").
+2. **Hover weapon-info card**, added to the hotbar first, then (same
+   session) factored into a shared `WeaponInfoCard.svelte` and extended to
+   the shop's `ShopItemCard.svelte` too, per explicit follow-up request.
+   Shows damage (with the mini pie), blast radius, weight stars, price,
+   owned qty, live shop stock (hotbar only — the shop card already shows
+   price/stock inline, so its hover version hides those to avoid
+   duplicating them), and — per a later follow-up — a one-line "what it
+   does" description per weapon, styled as a distinct caption with row
+   spacing tightened afterward per user feedback ("stats closer together
+   so they take up less real estate").
+3. **Match length 4 rounds → 3 rounds** (`MatchConfig.DEFAULT_MAX_ROUNDS`),
+   explicit user request. Also fixed several now-stale "4 rounds"
+   references in `shared/protocol.md`'s example payloads.
+4. **Two bugs fixed**: (a) bots stuck on "Not Ready" after a rematch —
+   confirmed root cause by reading `Match.rematch()` (it reset every
+   player's `ready` to `false`, bots included, but only `addBot()` ever
+   re-readies a bot, and bots have no client to click Ready again); fixed
+   with `p.ready = p.isBot` instead of an unconditional `false`. (b) New
+   **"Restart Session"** button (`App.svelte`, always visible next to
+   `ConnectionStatus`) — a pure client-side teardown (clears
+   `sessionStore`'s persisted session, reloads the page) for when the
+   lobby/match gets into a broken state the graceful `PlayAgain` flow
+   can't reach.
+
+**A real deploy-pipeline gotcha surfaced mid-session, worth remembering**:
+the server's GitHub Actions deploy (`.github/workflows/deploy-server.yml`)
+only triggers on pushes touching `server/**`, and when it does, it fully
+**restarts the Java process** — which, since match state only ever lives
+in server memory, would drop any match genuinely in progress on the live
+deployed site at that moment. The client (Vercel) deploys on every push
+to `master` regardless of path, but only takes effect in an already-open
+browser tab after a manual reload. Worth flagging to the user before any
+future server-touching push if they mention being mid-game on the live
+site.
+
+All of tonight's work: full server suite green throughout, full client
+suite green (77/77) throughout, clean builds, and live Playwright
+verification against the real dev servers for every UI-visible change
+(including actually playing through to the shop phase against a bot to
+screenshot the shop's hover card).
