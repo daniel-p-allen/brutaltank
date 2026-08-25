@@ -146,6 +146,33 @@ class ProjectileSimTest {
     }
 
     @Test
+    void shallowTunnelingEntryStaysBoundedInsteadOfCrossingTheMap() {
+        // Regression test for a real bug (live playtest, 2026-08-25): a
+        // near-horizontal tunneling entry accumulates TUNNELING_MAX_PENETRATION's
+        // *vertical* depth so slowly that, with no velocity decay, it could
+        // tunnel most of the 1600-unit map before the depth cap ever fired
+        // ("the entire lay of the land fell"). Confirmed empirically before
+        // this fix: a 1deg entry traveled ~1035 world-units underground.
+        // TUNNELING_VELOCITY_RETENTION_PER_STEP now drains speed while
+        // underground, so even a near-flat entry stalls out well short of
+        // the map -- and, per the user's own framing ("drain power... but
+        // not indefinitely"), does so consistently regardless of exactly
+        // how shallow the entry angle is.
+        Terrain terrain = flatTerrain(400);
+        ProjectileSim.Result result = ProjectileSim.simulate(200, 400, 1, 100, 0, terrain,
+                Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.TUNNELING, 1.0, 1.0, false);
+
+        double horizontalTravel = 0;
+        for (int i = 1; i < result.undergroundPath.size(); i++) {
+            double dx = result.undergroundPath.get(i)[0] - result.undergroundPath.get(i - 1)[0];
+            if (Math.abs(dx) > 800) continue; // skip a map-wrap discontinuity, not a real jump
+            horizontalTravel += Math.abs(dx);
+        }
+        assertTrue(horizontalTravel < 800,
+                "a near-horizontal tunneling entry should stall well short of the map, traveled " + horizontalTravel);
+    }
+
+    @Test
     void bouncingFlatTierReachesFiveBounces() {
         // Redesigned mechanic (per user feedback: "it will always bounce...
         // between 3 and 5 bounces depending on angle"): a flat/skimming

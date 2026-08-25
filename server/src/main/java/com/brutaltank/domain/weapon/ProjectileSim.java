@@ -96,6 +96,27 @@ public final class ProjectileSim {
     // see no tunnel... what I see is nothing"). 160 gives real elongated
     // travel underground before the final explosion.
     public static final double TUNNELING_MAX_PENETRATION = 160.0;
+    // The penetration cap above only measures *vertical* depth -- a
+    // shallow/near-horizontal entry angle accumulates depth very slowly
+    // while still covering large horizontal distance every step, so it
+    // could tunnel most of the 1600-unit map before the depth cap ever
+    // fired (live playtest report, 2026-08-25: bots firing a tunneling
+    // weapon nearly flat "reshaped the entire lay of the land"). Fixed
+    // per the user's own framing ("terrain should drain power so it
+    // penetrates for a distance, but not indefinitely") with a velocity
+    // decay while underground, same retention-factor pattern already used
+    // for BOUNCING below, rather than a hard horizontal-distance cap
+    // (which would need extra care around the map's cyclic wrap). A
+    // steep/moderate entry is barely affected -- it's still governed by
+    // the depth cap above, same as before, since decay has little time to
+    // accumulate before that fires; only a shallow entry that previously
+    // had no real limit now genuinely stalls. First-pass tuning, same
+    // "test it and see" spirit as this session's power/wind retune:
+    // 0.965/step decays a max-power shallow entry (~900 units/s
+    // horizontal) to a stop within roughly 300-500 world units of
+    // underground travel.
+    public static final double TUNNELING_VELOCITY_RETENTION_PER_STEP = 0.965;
+    public static final double TUNNELING_MIN_UNDERGROUND_SPEED = 15.0;
     // Bounce budget ceiling/floor and the angle tiers that pick between them
     // (per user feedback: "it will always bounce... between 3 and 5 bounces
     // depending on angle" — replaces the old <35deg shallow-angle gate,
@@ -340,6 +361,16 @@ public final class ProjectileSim {
             }
 
             if (inPenetration) {
+                // Drains speed while underground -- see
+                // TUNNELING_VELOCITY_RETENTION_PER_STEP's javadoc: this is
+                // what actually bounds a shallow entry's horizontal travel,
+                // the vertical depth cap below can't catch it in time.
+                vx *= TUNNELING_VELOCITY_RETENTION_PER_STEP;
+                vy *= TUNNELING_VELOCITY_RETENTION_PER_STEP;
+                if (Math.hypot(vx, vy) < TUNNELING_MIN_UNDERGROUND_SPEED) {
+                    terminated = true;
+                    break;
+                }
                 // Tunneling: keep integrating "underground" until cumulative
                 // penetration depth passes the cap. Still check for a tank
                 // hit each step (a tank whose own ground gave way can end up

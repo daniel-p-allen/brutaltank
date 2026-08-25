@@ -15,7 +15,16 @@
 import { worldToCanvas, type Viewport } from './coords';
 
 const GRAVITY = 220.0;
-const POWER_SCALE = 12.0;
+// Must be hand-kept in sync with ProjectileSim.POWER_SCALE (same
+// convention as WEAPON_PHYSICS below) -- this drifted out of sync during
+// the 2026-08-25 physics retune (server 12.0 -> 9.0, this constant never
+// updated), which was the actual root cause of a live-playtest report
+// ("Baby Missile + favorable wind, the real shot landed short of the
+// preview line"): the preview was overestimating every shot's power by
+// 33%, so it always showed farther than the real, now-weaker shot could
+// reach -- nothing to do with wind or homing. Any *future* POWER_SCALE
+// retune must touch this constant too.
+const POWER_SCALE = 9.0;
 const DT = 1 / 30; // coarser than the server's 1/60 — a preview, not a resolver
 const MAX_STEPS = 600; // 20s of flight time, matching ProjectileSim's own safety cap
 
