@@ -7,7 +7,13 @@
 
 	import { matchStore } from '../../stores/matchStore';
 	import { sessionStore } from '../../stores/sessionStore';
-	import { weaponSelectStore, WEAPON_CATALOG, formatQuantity, hasAmmo } from '../../stores/weaponSelectStore';
+	import {
+		weaponSelectStore,
+		WEAPON_CATALOG,
+		formatQuantity,
+		hasAmmo,
+		damagePieGradient
+	} from '../../stores/weaponSelectStore';
 
 	export let disabled = false;
 
@@ -34,6 +40,9 @@
 					<span class="weight">{'★'.repeat(entry.weightClass)}</span>
 				{/if}
 			</span>
+			{#if entry.centerDamage}
+				<span class="dmg-pie" style="background: {damagePieGradient(entry.centerDamage)}" title="Damage rating"></span>
+			{/if}
 		</button>
 	{/each}
 </div>
@@ -50,6 +59,7 @@
 	}
 
 	.chip {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -62,6 +72,23 @@
 		color: #eee;
 		font-size: 0.8rem;
 		cursor: pointer;
+	}
+
+	/* Damage rating (2026-08-25 user request): a small pie sampling a FIXED
+	   color wheel -- 1 o'clock (~8.3%) = yellow, 6 o'clock (50%) = orange,
+	   12 o'clock (100%, a full lap) = red -- revealed only up to the
+	   weapon's own damage fraction (see weaponSelectStore.damagePieGradient).
+	   A weak weapon's small wedge stays yellow; only a near-max weapon's
+	   wedge sweeps far enough to reach red. */
+	.dmg-pie {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		border: 2px solid #191d24;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 	}
 
 	.label {
