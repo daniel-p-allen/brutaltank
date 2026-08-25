@@ -163,7 +163,7 @@ class MatchTurnStateMachineTest {
         assertNotNull(roundEnded);
         assertEquals(p1.playerId(), roundEnded.get("winnerPlayerId").asText());
 
-        // Round < maxRounds (4): RoundEnded is immediately followed by a shop
+        // Round < maxRounds (3): RoundEnded is immediately followed by a shop
         // phase (M4), not an immediate respawn — protocol.md's "no shop pause"
         // note was an M2 simplification, since superseded.
         assertEquals(Match.Status.SHOP, match.status());

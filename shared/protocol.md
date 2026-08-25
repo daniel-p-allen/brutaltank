@@ -71,7 +71,7 @@ Cover match creation, joining, readiness, and reconnection (`LobbyManager`, sect
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `displayName` | string | yes | Player's chosen name, shown to other players. |
-| `matchConfig` | object \| null | no | Optional overrides (e.g. `maxRounds`, `maxPlayers`, `botCount`, `botDifficulty`). `null`/omitted uses server defaults (`maxRounds: 4`, up to 8 players, 0 bots). |
+| `matchConfig` | object \| null | no | Optional overrides (e.g. `maxRounds`, `maxPlayers`, `botCount`, `botDifficulty`). `null`/omitted uses server defaults (`maxRounds: 3`, up to 8 players, 0 bots). |
 
 `matchConfig.botCount` (integer, default 0) spawns that many AI-controlled
 players into the match immediately after creation, clamped to `[0,
@@ -196,7 +196,7 @@ Broadcast to everyone in a `WAITING` match whenever roster or readiness changes 
   "type": "MatchStarted",
   "v": 1,
   "payload": {
-    "matchConfig": { "maxRounds": 4, "maxPlayers": 8 },
+    "matchConfig": { "maxRounds": 3, "maxPlayers": 8 },
     "players": [ { "playerId": "p-1", "displayName": "Dan", "color": "#e33", "cash": 500, "isBot": false } ]
   }
 }
@@ -214,7 +214,7 @@ Broadcast once when the lobby transitions `WAITING` → `IN_PROGRESS` (all playe
     "matchId": "m-9f2a",
     "status": "IN_PROGRESS",
     "roundNumber": 1,
-    "maxRounds": 4,
+    "maxRounds": 3,
     "terrain": { "heights": [412, 411, 409, "... one int per world column ..."] },
     "players": [
       {

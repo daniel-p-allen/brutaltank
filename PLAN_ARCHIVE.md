@@ -66,6 +66,8 @@ active living plan for the remaining weapons).
 
 ## Balance/tuning changes
 
+- **Match length shortened 4 rounds -> 3 rounds — done 2026-08-25.** Explicit user request. `MatchConfig.DEFAULT_MAX_ROUNDS`, plus every stale "4 rounds"/"maxRounds: 4" reference in `shared/protocol.md`'s example payloads and one test comment. Full server (`./gradlew test`) and client (`npm run test`) suites re-run green.
+
 - **Heavy Cannonball toned down (2026-08-25)**: centerDamage 80->60, blastRadius 45->38 (per "tone down the heavy cannonball... it is devastating"). Still the roster's second-hardest hitter behind Nuke.
 - **Baby Missile shop price, two bumps**: 0 -> 60 (2026-08-25, "baby missiles are bloody free" — starting loadout stays free, only shop resupply was unpriced) and then 60 -> 200 (2026-08-25, explicit user-specified follow-up number). Now mid-pack pricing.
 - **MIRV/Digger backward-flight rendering bug — fixed 2026-08-25.** Confirmed real client rendering bug: `ProjectileSim.java` intentionally lets a shot's x wrap around the cyclic 1600-unit map mid-flight, but `projectileRenderer.ts`'s `pointAtProgress` lerped x in a straight line between two resampled trajectory points with no wrap awareness — when a segment straddled the wrap it swept the rendered dot backward across almost the entire map in that one segment's slice of the flight animation. Fixed with `lerpWrappedX` (shortest-path wrap-aware lerp). Regression test added (`projectileRenderer.test.ts`, new file).

@@ -107,7 +107,7 @@ BrutalTank/
 
 ### 2.3 Core domain model
 
-- **`Match`/`MatchState`**: `matchId`, `status` (WAITING/IN_PROGRESS/ROUND_TRANSITION/SHOP/COMPLETE), `players`, `currentRound`, `roundNumber`, `maxRounds` (default 4), `config`.
+- **`Match`/`MatchState`**: `matchId`, `status` (WAITING/IN_PROGRESS/ROUND_TRANSITION/SHOP/COMPLETE), `players`, `currentRound`, `roundNumber`, `maxRounds` (default 3, changed 4->3 per explicit user request 2026-08-25), `config`.
 - **`Round`/`RoundState`**: `terrain`, `turnOrder` (rotates starting player each round), `currentTurnIndex`, `wind {strength, directionSign}` (rerolled each turn, e.g. -20..+20), `activePlayers`, `shotHistory`.
 - **`Player`/`Tank`**: `playerId`, `displayName`, `color`, `cash`, `loadout` (weaponId → quantity), `activeShieldId`, `tank {x, y (from terrain height), health 0-100, alive}`.
 - **`Terrain`**: `int[] heights`, one entry per world column (e.g. width 1600 units, independent of screen resolution, client scales to canvas). `TerrainGenerator.applyCrater(x, radius, depthFn)` lowers a falloff-shaped range of columns, clamped to a world floor. Server-side mutable truth; never fully re-sent mid-round.

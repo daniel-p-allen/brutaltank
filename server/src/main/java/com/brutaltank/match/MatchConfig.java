@@ -2,10 +2,11 @@ package com.brutaltank.match;
 
 import com.brutaltank.protocol.Payloads;
 
-/** Resolved per-match configuration, per PLAN.md 2.3/5 (M2 defaults: 4 rounds, up to 8 players). */
+/** Resolved per-match configuration, per PLAN.md 2.3/5 (M2 defaults: 3 rounds, up to 8 players). */
 public record MatchConfig(int maxRounds, int maxPlayers, int botCount, Difficulty botDifficulty) {
 
-    public static final int DEFAULT_MAX_ROUNDS = 4;
+    // 4 -> 3 (explicit user request, 2026-08-25).
+    public static final int DEFAULT_MAX_ROUNDS = 3;
     public static final int DEFAULT_MAX_PLAYERS = 8;
     public static final int DEFAULT_BOT_COUNT = 0;
     public static final Difficulty DEFAULT_BOT_DIFFICULTY = Difficulty.MIXED;
