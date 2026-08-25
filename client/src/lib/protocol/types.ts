@@ -46,6 +46,7 @@ export interface Player {
 	loadout: Record<string, number>;
 	activeShieldId: string | null;
 	tank: Tank;
+	isBot: boolean;
 }
 
 export interface Point {
@@ -181,6 +182,8 @@ export type ShotResolvedEnvelope = Envelope<ShotResolvedPayload>;
 export interface MatchConfig {
 	maxRounds: number;
 	maxPlayers: number;
+	botCount: number;
+	botDifficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'MIXED';
 }
 
 export interface CreateMatchPayload {
@@ -226,6 +229,7 @@ export interface LobbyPlayer {
 	displayName: string;
 	ready: boolean;
 	isHost: boolean;
+	isBot: boolean;
 }
 
 export interface LobbyUpdatePayload {
@@ -239,6 +243,7 @@ export interface MatchStartedPlayer {
 	displayName: string;
 	color: string;
 	cash: number;
+	isBot: boolean;
 }
 
 export interface MatchStartedPayload {

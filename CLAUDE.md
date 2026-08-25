@@ -362,6 +362,70 @@ Follow-up session. Three things:
    (`keyboardInput.test.ts`'s `isTypingTarget` describe block) pinning the
    range-input case specifically.
 
+## 2026-08-25 session: playtest bug batch — wrap-render bug, shop-phase disconnect gap, balance
+
+Live-playtest notes surfaced 6 items; investigated all before fixing.
+
+**Fixed, high-confidence:**
+1. **MIRV/Digger "flew backwards across the map"** — real client rendering
+   bug, confirmed. `ProjectileSim.java` intentionally lets a shot's x wrap
+   around the cyclic map edge mid-flight (comment: shots can wrap the
+   1600-unit map multiple times at full power). But
+   `projectileRenderer.ts`'s `pointAtProgress` lerped x in a straight line
+   between two resampled trajectory points with no wrap awareness — when a
+   segment straddled the wrap (e.g. x≈1590 -> x≈10), it swept the rendered
+   dot backward across almost the entire map in that one segment's slice of
+   the 1200ms flight animation, before resuming forward from the correct
+   post-wrap position. Read exactly like the report: "went off the top
+   left... magically returned... backwards over the person that fired."
+   Fixed with `lerpWrappedX` (shortest-path wrap-aware lerp). Regression
+   test added (`projectileRenderer.test.ts`, new file).
+2. **Heavy Cannonball toned down**: centerDamage 80->60, blastRadius
+   45->38 (per "tone down the heavy cannonball... it is devastating").
+   Still the roster's second-hardest hitter behind Nuke.
+3. **Baby Missile shop price 0->60** (per "baby missiles are bloody free").
+   Starting loadout (defaultQty 5) is still free — only shop resupply now
+   costs cash. Cheapest paid weapon in the shop, matching its lightweight
+   stats.
+4. **Shop-phase disconnect was a silent no-op — several real gaps closed.**
+   `Match.handleDisconnect` used to `return` immediately whenever
+   `status != IN_PROGRESS`, which (beyond the intentional WAITING case)
+   silently swallowed SHOP too: no broadcast, and critically no grace timer
+   ever scheduled, so a player who dropped mid-shop was invisible and never
+   properly reaped into `departed`. Combined with `shopContinue()` already
+   treating `!connected` players as skippable for its "everyone's ready"
+   check, this meant a shop-phase disconnect could let the remaining
+   player(s) advance out of the shop — and, on later rounds, straight to
+   match end — with zero warning. This is the leading suspect for "we were
+   in the shop and all of a sudden the other player had the match complete
+   screen come up," though not confirmed via live repro. Fixed:
+   `handleDisconnect` now schedules the grace timer for SHOP same as
+   IN_PROGRESS; `onGraceExpired`'s SHOP branch now broadcasts
+   `PlayerDisconnected` and calls `endMatch()` (so `MatchEnded` actually
+   fires) if that was the last remaining player; `advanceToNextRoundOrEnd`'s
+   empty-turnOrder path now calls `endMatch()` too instead of silently
+   setting `status = COMPLETE` with no broadcast (same bug, different
+   trigger path); `rejoin()` gained a SHOP branch (previously unhandled
+   entirely — a reconnect during SHOP got no `MatchStateSync`-equivalent at
+   all) that resends `ShopOpened` with the live price list/stock to the
+   rejoining client and broadcasts `PlayerReconnected`.
+
+**Investigated, not confirmed — needs a live repro:**
+5. **"My number of weapons in the shop is not updating when other players
+   buy them."** Read through the full path (`Match.purchase()` broadcasts
+   `ShopUpdate` to every connected player; `matchStore.applyShopUpdate`
+   patches `shop.stockRemaining` unconditionally; `ShopOverlay.svelte`/
+   `ShopItemCard.svelte` are reactive off it, keyed `#each` blocks) and
+   found nothing wrong. Possible it's actually downstream of bug #4 above
+   (a ghost/disconnected player's client stops receiving broadcasts) rather
+   than its own bug — no fix applied pending a repro (match code + rough
+   timing).
+
+**Not a bug, noted and left as-is:**
+6. **"instead of just a slider"** — the note as given was cut off with no
+   context; needs the user to clarify what they meant before anything can
+   be done.
+
 **Open, unreproduced report from this session: "both readied up, match
 stuck on lobby."** Live report from the user testing the deployed app
 (`brutaltank.vercel.app` client / `wss://brutaltank.aktiva.com.au` server)
@@ -386,3 +450,91 @@ only the `allReady` gate does), which would look exactly like this with no
 client-visible error. Not confirmed — asked the user to retry and, if it
 recurs, capture the match code + browser console output for a targeted
 look at that specific match's live state.
+
+## 2026-08-25 session part 2: playtest bug batch, then bots (new main feature)
+
+Two pieces of work this session.
+
+**Playtest bug batch** (server: MIRV/Digger trajectory-wrap render bug,
+Heavy Cannonball damage/radius pulled back, Baby Missile given a real shop
+price, a shop-phase disconnect gap that likely explains "match complete
+popped up mid-shop"): full detail already folded into the relevant weapon/
+bug sections above and in `PLAN.md`'s Future Ideas — see git history around
+this session for the exact diffs (`projectileRenderer.ts`'s `lerpWrappedX`,
+`WeaponDef.HEAVY_CANNONBALL`/`BABY_MISSILE`, `Match.handleDisconnect`/
+`onGraceExpired`/`rejoin`'s new SHOP-phase branches).
+
+**Bots — new main feature, planned then built same session (2026-08-25).**
+Full design lives in `PLAN.md`'s Future Ideas entry (search "Bots
+(AI-controlled players)"); this note is the "how it actually works" pointer
+for a future session picking it up.
+
+- **Architecture**: bots are server-side only. `Match.addBot(displayName,
+  BotProfile)` adds a plain `MatchPlayer` with `sink=null` (already safe —
+  `broadcast()` null-checks every sink) and `connected=true` forever (so it
+  counts toward turn-order/ready checks like a human, but is structurally
+  unreachable by the disconnect/reap machinery — nothing ever calls
+  `handleDisconnect` on it). `Match` gained two tiny hooks —
+  `botController.onTurnStarted(...)` at the end of `beginTurn()`,
+  `botController.onShopOpened(...)` at the end of `openShop()` — plus a
+  handful of read-only package-private snapshot accessors
+  (`tankSnapshots()`, `terrainSnapshot()`, `windStrength()`,
+  `loadoutSnapshot()`, `priceListSnapshot()`, `isTurnTokenCurrent()`/
+  `isShopTokenCurrent()` staleness guards mirroring `onTurnTimeout`'s
+  existing `token != turnToken` pattern). Everything else is 5 new files
+  in `server/src/main/java/com/brutaltank/match/`: `Difficulty` (enum),
+  `BotProfile` (per-bot randomized skill/personality, `forDifficulty`
+  factory), `BotAimPlanner` (pure — grid-searches `ProjectileSim.simulate`
+  for a target-hitting shot, then degrades it per skill), `BotShopPlanner`
+  (pure — spends a profile-scaled cash fraction), `BotController` (the only
+  stateful piece — schedules a 1.5-4.5s "thinking" delay via `Match`'s
+  existing `ScheduledExecutorService`, then calls `match.fire()`/
+  `purchase()`/`shopContinue()` directly, no fake WebSocket).
+- **Real physics-sensitivity finding while tuning `BotProfile`**: this
+  game's ballistic model (`POWER_SCALE=12`, multi-second flight times)
+  makes even a handful of raw power-units of noise swing the landing point
+  by hundreds of world-units — a naive "small % error" didn't read as
+  "small" at all once simulated. Retuned `BotProfile.forDifficulty`'s
+  power-error ranges down substantially from the first-pass numbers
+  (HARD 0.5-2, MEDIUM 2-5, EASY 6-12, vs. angle-error which didn't need the
+  same correction) after `BotAimPlannerTest` initially failed with ~270-unit
+  average misses for a "skilled" bot on a flat 700-unit shot.
+- **Config surface**: `matchConfig.botCount`/`botDifficulty` on `CreateMatch`
+  (`MenuScreen.svelte`'s new bot-count/difficulty selectors, 0-6 bots,
+  default Mixed — Mixed resolves each bot to an independently random
+  concrete tier, not one blended skill level). `isBot` threaded onto every
+  player DTO (`LobbyPlayerDto`/`StartedPlayerDto`/`PlayerDto` server-side,
+  `LobbyPlayer`/`MatchStartedPlayer`/`Player` client-side) — shown as a
+  small badge in both `LobbyScreen.svelte` and `MatchScreen.svelte`'s
+  player cards. `shared/protocol.md` updated in lockstep per its own
+  convention (additive fields, no `v` bump).
+- **Verification**: `BotAimPlannerTest`/`BotShopPlannerTest` (pure-function
+  unit tests — skilled vs. unskilled miss distance, wind-blind vs.
+  wind-aware, never-fires-with-no-ammo, shield-activation-when-low-health;
+  shop purchases never exceed cash/stock, money-sense affects reserve size)
+  and `BotIntegrationTest` (a lone human + 2 bots auto-starts on Ready,
+  reaches `COMPLETE`, bots never `TurnForfeited`). Full server (`./gradlew
+  test`) and client (`npm run test -- --run`) suites both green throughout.
+  Also did a **real end-to-end manual verification** against the actual dev
+  servers (Playwright, not mocked): created a match as a lone human with 2
+  bots, confirmed the lobby showed both pre-readied with BOT badges, the
+  match auto-started on Ready, and — after firing once as the human to kick
+  things off — the bots visibly took their own turns within seconds, dealt
+  real damage, earned real cash, and the match progressed exactly like a
+  real multiplayer game, entirely on its own from there.
+- **Deliberately out of scope this pass** (see `PLAN.md`'s Future Ideas
+  entry for the full list): no cosmetic `PlayerAiming`/`TrajectoryHelpUpdate`
+  broadcasts from bots (no visible barrel-tracking before they fire), no
+  mid-lobby bot add/remove UI (creation-time only, per the user's own
+  framing), no per-bot individual difficulty picker (one match-wide setting,
+  or Mixed for per-bot randomness within that).
+
+**Also this session**: user asked for a **permanent cross-match
+leaderboard** (whoever has the top score for a match goes on an ongoing
+running total) — explicitly plan-only, not to be built yet. Filed as its
+own `PLAN.md` Future Ideas entry with the real open questions (what "score"
+means, `playerId` being ephemeral/per-match today with no persistent
+identity system, and this being the *first* genuinely persistent data this
+project would ever need — everything today lives only in server memory and
+vanishes on restart). Needs a real conversation with the user before
+scoping, not a design-by-assumption.

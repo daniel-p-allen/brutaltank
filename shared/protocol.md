@@ -71,7 +71,17 @@ Cover match creation, joining, readiness, and reconnection (`LobbyManager`, sect
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `displayName` | string | yes | Player's chosen name, shown to other players. |
-| `matchConfig` | object \| null | no | Optional overrides (e.g. `maxRounds`, `maxPlayers`). `null`/omitted uses server defaults (`maxRounds: 4`, up to 8 players). |
+| `matchConfig` | object \| null | no | Optional overrides (e.g. `maxRounds`, `maxPlayers`, `botCount`, `botDifficulty`). `null`/omitted uses server defaults (`maxRounds: 4`, up to 8 players, 0 bots). |
+
+`matchConfig.botCount` (integer, default 0) spawns that many AI-controlled
+players into the match immediately after creation, clamped to `[0,
+maxPlayers - 1]` (always leaves room for the creator). `matchConfig.botDifficulty`
+(string: `"EASY"` \| `"MEDIUM"` \| `"HARD"` \| `"MIXED"`, default `"MIXED"`)
+sets their skill tier — `"MIXED"` picks a random concrete tier per bot
+rather than one blended skill level. Bots auto-ready immediately (see
+`LobbyUpdate`'s `isBot` field below) and drive their own turns/shop
+purchases server-side once the match starts — they never require a client
+connection or any message from a real player.
 
 Creates a new `WAITING` match, registers it in `MatchRegistry`, and makes the creator the host.
 
@@ -169,8 +179,8 @@ Sent only to the joiner, in reply to a successful `JoinMatch` — the `JoinMatch
   "payload": {
     "matchId": "m-9f2a",
     "players": [
-      { "playerId": "p-1", "displayName": "Dan", "ready": true, "isHost": true },
-      { "playerId": "p-2", "displayName": "Riley", "ready": false, "isHost": false }
+      { "playerId": "p-1", "displayName": "Dan", "ready": true, "isHost": true, "isBot": false },
+      { "playerId": "p-2", "displayName": "Bot Rex", "ready": true, "isHost": false, "isBot": true }
     ],
     "hostId": "p-1"
   }
@@ -187,7 +197,7 @@ Broadcast to everyone in a `WAITING` match whenever roster or readiness changes 
   "v": 1,
   "payload": {
     "matchConfig": { "maxRounds": 4, "maxPlayers": 8 },
-    "players": [ { "playerId": "p-1", "displayName": "Dan", "color": "#e33", "cash": 500 } ]
+    "players": [ { "playerId": "p-1", "displayName": "Dan", "color": "#e33", "cash": 500, "isBot": false } ]
   }
 }
 ```
@@ -214,7 +224,8 @@ Broadcast once when the lobby transitions `WAITING` → `IN_PROGRESS` (all playe
         "cash": 500,
         "loadout": { "basic_shell": -1, "baby_missile": 5 },
         "activeShieldId": null,
-        "tank": { "x": 120, "y": 405, "health": 100, "alive": true }
+        "tank": { "x": 120, "y": 405, "health": 100, "alive": true },
+        "isBot": false
       }
     ],
     "turnOrder": ["p-1", "p-2"],

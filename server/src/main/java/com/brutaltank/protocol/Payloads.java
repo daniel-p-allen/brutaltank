@@ -74,12 +74,13 @@ public final class Payloads {
         public Map<String, Integer> loadout;
         public String activeShieldId;
         public TankDto tank;
+        public boolean isBot;
 
         public PlayerDto() {
         }
 
         public PlayerDto(String playerId, String displayName, String color, int cash,
-                          Map<String, Integer> loadout, String activeShieldId, TankDto tank) {
+                          Map<String, Integer> loadout, String activeShieldId, TankDto tank, boolean isBot) {
             this.playerId = playerId;
             this.displayName = displayName;
             this.color = color;
@@ -87,6 +88,7 @@ public final class Payloads {
             this.loadout = loadout;
             this.activeShieldId = activeShieldId;
             this.tank = tank;
+            this.isBot = isBot;
         }
     }
 
@@ -357,6 +359,8 @@ public final class Payloads {
     public static final class MatchConfigDto {
         public Integer maxRounds;
         public Integer maxPlayers;
+        public Integer botCount;
+        public String botDifficulty;
 
         public MatchConfigDto() {
         }
@@ -446,15 +450,17 @@ public final class Payloads {
         public String displayName;
         public boolean ready;
         public boolean isHost;
+        public boolean isBot;
 
         public LobbyPlayerDto() {
         }
 
-        public LobbyPlayerDto(String playerId, String displayName, boolean ready, boolean isHost) {
+        public LobbyPlayerDto(String playerId, String displayName, boolean ready, boolean isHost, boolean isBot) {
             this.playerId = playerId;
             this.displayName = displayName;
             this.ready = ready;
             this.isHost = isHost;
+            this.isBot = isBot;
         }
     }
 
@@ -481,15 +487,17 @@ public final class Payloads {
         public String displayName;
         public String color;
         public int cash;
+        public boolean isBot;
 
         public StartedPlayerDto() {
         }
 
-        public StartedPlayerDto(String playerId, String displayName, String color, int cash) {
+        public StartedPlayerDto(String playerId, String displayName, String color, int cash, boolean isBot) {
             this.playerId = playerId;
             this.displayName = displayName;
             this.color = color;
             this.cash = cash;
+            this.isBot = isBot;
         }
     }
 

@@ -28,8 +28,8 @@ describe('lobbyStore', () => {
 		const payload: LobbyUpdatePayload = {
 			matchId: 'm-9f2a',
 			players: [
-				{ playerId: 'p-1', displayName: 'Dan', ready: true, isHost: true },
-				{ playerId: 'p-2', displayName: 'Riley', ready: false, isHost: false }
+				{ playerId: 'p-1', displayName: 'Dan', ready: true, isHost: true, isBot: false },
+				{ playerId: 'p-2', displayName: 'Riley', ready: false, isHost: false, isBot: false }
 			],
 			hostId: 'p-1'
 		};
@@ -43,14 +43,15 @@ describe('lobbyStore', () => {
 			playerId: 'p-2',
 			displayName: 'Riley',
 			ready: false,
-			isHost: false
+			isHost: false,
+			isBot: false
 		});
 	});
 
 	it('applyLobbyUpdate is a pure full-replace helper', () => {
 		const state = applyLobbyUpdate({
 			matchId: 'm-1',
-			players: [{ playerId: 'p-1', displayName: 'Dan', ready: false, isHost: true }],
+			players: [{ playerId: 'p-1', displayName: 'Dan', ready: false, isHost: true, isBot: false }],
 			hostId: 'p-1'
 		});
 		expect(state.players).toHaveLength(1);
@@ -66,7 +67,7 @@ describe('lobbyStore', () => {
 				v: 1,
 				payload: {
 					matchId: 'm-1',
-					players: [{ playerId: 'p-1', displayName: 'Dan', ready: false, isHost: true }],
+					players: [{ playerId: 'p-1', displayName: 'Dan', ready: false, isHost: true, isBot: false }],
 					hostId: 'p-1'
 				}
 			})

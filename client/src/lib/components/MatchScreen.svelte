@@ -136,6 +136,7 @@
 				>
 					<div class="player-card-header">
 						<span class="player-name">{player.displayName}</span>
+						{#if player.isBot}<span class="bot-badge">BOT</span>{/if}
 						{#if $matchStore.disconnectedPlayerIds.includes(player.playerId)}
 							<span class="disconnected-badge">disconnected</span>
 						{/if}
@@ -302,6 +303,14 @@
 	.disconnected-badge {
 		font-size: 0.65rem;
 		color: #e0a020;
+	}
+
+	.bot-badge {
+		font-size: 0.65rem;
+		padding: 0.1rem 0.3rem;
+		border-radius: 4px;
+		background: #3e6e9e;
+		color: white;
 	}
 
 	/* Running-totals bar: fill width is set inline per-player (relative to

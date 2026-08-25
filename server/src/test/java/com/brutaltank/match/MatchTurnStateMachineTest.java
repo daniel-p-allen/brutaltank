@@ -45,7 +45,9 @@ class MatchTurnStateMachineTest {
     }
 
     private Match newMatch(String id, int maxRounds, int maxPlayers) {
-        return new Match(id, MAPPER, new MatchConfig(maxRounds, maxPlayers), scheduler);
+        return new Match(id, MAPPER,
+                new MatchConfig(maxRounds, maxPlayers, MatchConfig.DEFAULT_BOT_COUNT, MatchConfig.DEFAULT_BOT_DIFFICULTY),
+                scheduler);
     }
 
     private record Joined(String playerId, FakeMessageSink sink) {

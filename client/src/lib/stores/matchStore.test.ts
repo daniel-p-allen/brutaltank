@@ -16,7 +16,8 @@ const samplePayload: MatchStateSyncPayload = {
 			cash: 500,
 			loadout: { basic_shell: -1 },
 			activeShieldId: null,
-			tank: { x: 1, y: 101, health: 100, alive: true }
+			tank: { x: 1, y: 101, health: 100, alive: true },
+			isBot: false
 		},
 		{
 			playerId: 'p-2',
@@ -25,7 +26,8 @@ const samplePayload: MatchStateSyncPayload = {
 			cash: 500,
 			loadout: { basic_shell: -1 },
 			activeShieldId: null,
-			tank: { x: 8, y: 108, health: 100, alive: true }
+			tank: { x: 8, y: 108, health: 100, alive: true },
+			isBot: false
 		}
 	],
 	turnOrder: ['p-1', 'p-2'],

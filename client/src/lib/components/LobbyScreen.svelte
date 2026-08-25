@@ -45,6 +45,7 @@
 		{#each $lobbyStore.players as player (player.playerId)}
 			<li class="player" class:you={player.playerId === $sessionStore.playerId}>
 				<span class="name">{player.displayName}</span>
+				{#if player.isBot}<span class="badge bot">Bot</span>{/if}
 				{#if player.isHost}<span class="badge host">Host</span>{/if}
 				{#if player.playerId === $sessionStore.playerId}<span class="badge you-badge">You</span
 					>{/if}
@@ -116,6 +117,11 @@
 
 	.badge.host {
 		background: #a8730a;
+		color: white;
+	}
+
+	.badge.bot {
+		background: #3e6e9e;
 		color: white;
 	}
 

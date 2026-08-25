@@ -15,7 +15,7 @@
 // user feedback ("more graphics and smoke, and fire") — every other weapon
 // keeps the original generic flash unchanged.
 
-import { worldToCanvas, type Viewport } from './coords';
+import { worldToCanvas, WORLD_WIDTH, type Viewport } from './coords';
 import type { Point } from '../../protocol/types';
 
 export const PROJECTILE_ANIMATION_DURATION_MS = 1200;
@@ -47,6 +47,22 @@ const NAPALM_FLASH_DURATION_MS = 900;
 const NAPALM_EFFECT_DURATION_MS = 1400;
 const NAPALM_FLAME_COUNT = 6;
 
+// ProjectileSim.java lets a shot's x wrap around the map edge mid-flight
+// (world is horizontally cyclic — see its "Screen wrap" comment), so two
+// adjacent points in the raw/resampled path can jump from near WORLD_WIDTH
+// to near 0 (or vice versa). A plain lerp across that jump swept the dot
+// backward across almost the entire map in one resampled segment's time —
+// looked exactly like "flew off the left edge, then shot backwards over the
+// firer to the other side" (bug report, MIRV/Digger — anything with enough
+// range to wrap). Fixed by lerping along the *shorter* wrapped path instead.
+function lerpWrappedX(ax: number, bx: number, t: number): number {
+	let dx = bx - ax;
+	if (dx > WORLD_WIDTH / 2) dx -= WORLD_WIDTH;
+	else if (dx < -WORLD_WIDTH / 2) dx += WORLD_WIDTH;
+	const x = ax + dx * t;
+	return ((x % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH;
+}
+
 /** Returns a point along the (already resampled) trajectory for a given 0..1 progress. */
 export function pointAtProgress(trajectory: Point[], progress: number): Point | null {
 	if (trajectory.length === 0) return null;
@@ -60,7 +76,7 @@ export function pointAtProgress(trajectory: Point[], progress: number): Point | 
 
 	const a = trajectory[i];
 	const b = trajectory[i + 1];
-	return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+	return { x: lerpWrappedX(a.x, b.x, t), y: a.y + (b.y - a.y) * t };
 }
 
 /** Deterministic per-(seed) pseudo-random in [0,1) — stable across animation frames, varies per puff/impact so puffs don't all move identically. */

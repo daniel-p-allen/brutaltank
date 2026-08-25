@@ -99,6 +99,10 @@ public final class Match {
     // just no longer the primary way a shop phase normally ends.
     private final Set<String> shopReadyPlayerIds = new java.util.HashSet<>();
     private ScheduledFuture<?> pendingTimeout;
+    // Null when this match has no bots. Lazily created by the first addBot()
+    // call; see BotController's class doc for how it hooks into beginTurn()/
+    // openShop() below.
+    private BotController botController;
 
     private volatile long turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
     private volatile long reconnectGraceMs = DEFAULT_RECONNECT_GRACE_MS;
@@ -131,6 +135,21 @@ public final class Match {
     /** Tuning/test hook: overrides the 30s shop-phase-timeout default. See {@link #setTurnTimeoutMs}. */
     public void setShopTimeoutMs(long ms) {
         this.shopTimeoutMs = ms;
+    }
+
+    private long botThinkDelayMinMs = -1;
+    private long botThinkDelayMaxMs = -1;
+
+    /**
+     * Test-only hook: overrides BotController's default 1.5-4.5s (turn) /
+     * 0.8-3.3s (shop) randomized "thinking" delay so integration tests don't
+     * need to sleep real seconds per bot action. Only takes effect for bots
+     * added after this call (it's read once, when {@link #addBot} lazily
+     * creates the {@link BotController}).
+     */
+    public void setBotThinkDelayRangeMs(long minMs, long maxMs) {
+        this.botThinkDelayMinMs = minMs;
+        this.botThinkDelayMaxMs = maxMs;
     }
 
     // =================================================================
@@ -199,6 +218,7 @@ public final class Match {
         boolean ready;
         boolean isHost;
         boolean departed;
+        boolean isBot;
         int damageDealt;
         int kills;
         ScheduledFuture<?> graceTask;
@@ -234,6 +254,33 @@ public final class Match {
 
         broadcast("LobbyUpdate", buildLobbyUpdate());
         return JoinResult.ok(playerId, token);
+    }
+
+    /**
+     * Adds an AI-controlled player: a plain {@code MatchPlayer} with no
+     * socket ({@code sink=null}, safe -- {@code broadcast()} already
+     * null/open-checks every sink before sending) that stays {@code
+     * connected=true} forever so it counts toward turn order/ready checks
+     * exactly like a human, but is structurally unreachable by the
+     * disconnect/reap machinery (nothing ever calls {@code
+     * handleDisconnect} for it -- that's only wired to real socket
+     * close/idle-reap). Auto-readies via the existing {@link #setReady}
+     * path (not a bypass) so a lone human + already-ready bots simply
+     * auto-starts the match the instant the human clicks Ready.
+     */
+    public synchronized JoinResult addBot(String displayName, BotProfile profile) {
+        JoinResult result = addPlayer(displayName, null);
+        if (!result.success()) {
+            return result;
+        }
+        MatchPlayer mp = players.get(result.playerId());
+        mp.isBot = true;
+        if (botController == null) {
+            botController = new BotController(this, scheduler, botThinkDelayMinMs, botThinkDelayMaxMs);
+        }
+        botController.registerBot(result.playerId(), profile);
+        setReady(result.playerId(), true);
+        return result;
     }
 
     public synchronized ReadyResult setReady(String playerId, boolean ready) {
@@ -366,7 +413,18 @@ public final class Match {
             broadcast("LobbyUpdate", buildLobbyUpdate());
             return;
         }
-        if (status != Status.IN_PROGRESS) {
+        // SHOP falls through to the same grace-timer path as IN_PROGRESS
+        // (previously this returned here, silently: a shop-phase disconnect
+        // set connected=false with no broadcast and no graceTask ever
+        // scheduled, so the player neither reconnected cleanly nor ever
+        // reaped into `departed` — shopContinue()'s "everyone connected has
+        // continued" check would then fire early for the remaining
+        // player(s) with zero warning, and the disconnected player's own
+        // stale turnOrder slot could still come up in the next round. See
+        // CLAUDE.md's "match complete popped up mid-shop" playtest report,
+        // 2026-08-25 — this is the leading suspect.) COMPLETE is the only
+        // status that still legitimately needs no handling here.
+        if (status != Status.IN_PROGRESS && status != Status.SHOP) {
             return;
         }
 
@@ -397,6 +455,16 @@ public final class Match {
             Envelopes.send(sink, mapper, "MatchStateSync", null, buildStateSync());
         } else if (status == Status.WAITING) {
             broadcast("LobbyUpdate", buildLobbyUpdate());
+        } else if (status == Status.SHOP) {
+            // Previously unhandled: a reconnect during SHOP got neither a
+            // broadcast nor any shop state resent, so the returning client
+            // sat with a stale/blank shop UI (and other players never saw
+            // them come back) until the next round. Resends the current
+            // shop snapshot directly to the rejoining client only — everyone
+            // else already has it live via ShopUpdate.
+            broadcast("PlayerReconnected", new Payloads.PlayerIdPayload(target.player.playerId));
+            Envelopes.send(sink, mapper, "ShopOpened", null,
+                    new Payloads.ShopOpened((int) (shopTimeoutMs / 1000), buildPriceList()));
         }
         return RejoinResult.ok(target.player.playerId);
     }
@@ -412,6 +480,23 @@ public final class Match {
             turnOrder.remove(playerId);
             if (status == Status.WAITING) {
                 broadcast("LobbyUpdate", buildLobbyUpdate());
+            } else if (status == Status.SHOP) {
+                // Previously silent: a shop-phase disconnect that outlasted
+                // the reconnect grace period departed the player with no
+                // broadcast at all, and shopContinue()'s "everyone connected
+                // has continued" check already treats a disconnected player
+                // as skippable — so the remaining player(s) could advance
+                // out of the shop with no visible warning that anyone had
+                // left. See handleDisconnect's note on this same report.
+                broadcast("PlayerDisconnected", new Payloads.PlayerIdPayload(playerId));
+                if (turnOrder.isEmpty()) {
+                    // Every player departed mid-shop (e.g. both dropped) —
+                    // end the match properly (broadcasts MatchEnded) instead
+                    // of leaving `status` flipped to COMPLETE with nobody
+                    // ever told, which is what advanceToNextRoundOrEnd used
+                    // to do on this same empty-turnOrder path.
+                    endMatch();
+                }
             }
             return;
         }
@@ -526,6 +611,10 @@ public final class Match {
         broadcast("TurnStarted", turnStarted);
 
         pendingTimeout = scheduler.schedule(() -> onTurnTimeout(myToken), turnTimeoutMs, TimeUnit.MILLISECONDS);
+
+        if (botController != null) {
+            botController.onTurnStarted(activePlayerId, myToken);
+        }
     }
 
     // Per user feedback: "if you miss your turn without taking a shot, you
@@ -767,6 +856,10 @@ public final class Match {
         broadcast("ShopOpened", opened);
 
         pendingTimeout = scheduler.schedule(() -> onShopTimeout(myShopToken), shopTimeoutMs, TimeUnit.MILLISECONDS);
+
+        if (botController != null) {
+            botController.onShopOpened(myShopToken);
+        }
     }
 
     private synchronized void onShopTimeout(int token) {
@@ -814,7 +907,12 @@ public final class Match {
         roundNumber++;
         rotateTurnOrder();
         if (turnOrder.isEmpty()) {
-            status = Status.COMPLETE;
+            // Was `status = Status.COMPLETE;` with no broadcast — every
+            // remaining player departed during the shop phase that just
+            // ended, but nobody was ever told the match was over (see
+            // onGraceExpired's SHOP branch for the same fix on the other
+            // path into this state).
+            endMatch();
         } else {
             // startRound() itself doesn't touch status (it's also called from
             // startMatch(), which already set IN_PROGRESS) — the SHOP -> next
@@ -1521,7 +1619,7 @@ public final class Match {
             if (mp.departed) {
                 continue;
             }
-            dtos.add(new Payloads.LobbyPlayerDto(mp.player.playerId, mp.player.displayName, mp.ready, mp.isHost));
+            dtos.add(new Payloads.LobbyPlayerDto(mp.player.playerId, mp.player.displayName, mp.ready, mp.isHost, mp.isBot));
             if (mp.isHost) {
                 hostId = mp.player.playerId;
             }
@@ -1533,7 +1631,7 @@ public final class Match {
         List<Payloads.StartedPlayerDto> dtos = new ArrayList<>();
         for (String pid : turnOrder) {
             MatchPlayer mp = players.get(pid);
-            dtos.add(new Payloads.StartedPlayerDto(mp.player.playerId, mp.player.displayName, mp.player.color, mp.player.cash));
+            dtos.add(new Payloads.StartedPlayerDto(mp.player.playerId, mp.player.displayName, mp.player.color, mp.player.cash, mp.isBot));
         }
         return new Payloads.MatchStarted(new Payloads.ResolvedMatchConfigDto(config.maxRounds(), config.maxPlayers()), dtos);
     }
@@ -1554,7 +1652,7 @@ public final class Match {
             Payloads.TankDto tankDto = new Payloads.TankDto(mp.player.tank.x, mp.player.tank.y, mp.player.tank.health, mp.player.tank.alive);
             sync.players.add(new Payloads.PlayerDto(
                     mp.player.playerId, mp.player.displayName, mp.player.color, mp.player.cash,
-                    mp.player.loadout, mp.player.activeShieldId, tankDto));
+                    mp.player.loadout, mp.player.activeShieldId, tankDto, mp.isBot));
         }
         sync.turnOrder = new ArrayList<>(turnOrder);
         sync.currentTurnIndex = currentTurnIndex;
@@ -1657,6 +1755,52 @@ public final class Match {
 
     synchronized Terrain debugTerrain() {
         return terrain;
+    }
+
+    // ---- BotController/BotAimPlanner/BotShopPlanner read-only snapshots ----
+
+    /** One tank's battlefield state, as a bot needs to see it. */
+    record TankSnapshot(String playerId, double x, double y, double health, boolean alive, String activeShieldId) {
+    }
+
+    synchronized Terrain terrainSnapshot() {
+        return terrain;
+    }
+
+    synchronized int windStrength() {
+        return windStrength;
+    }
+
+    synchronized List<TankSnapshot> tankSnapshots() {
+        List<TankSnapshot> out = new ArrayList<>();
+        for (MatchPlayer mp : players.values()) {
+            if (mp.departed) {
+                continue;
+            }
+            out.add(new TankSnapshot(mp.player.playerId, mp.player.tank.x, mp.player.tank.y,
+                    mp.player.tank.health, mp.player.tank.alive, mp.player.activeShieldId));
+        }
+        return out;
+    }
+
+    synchronized Map<String, Integer> loadoutSnapshot(String playerId) {
+        MatchPlayer mp = players.get(playerId);
+        return mp == null ? Map.of() : new LinkedHashMap<>(mp.player.loadout);
+    }
+
+    synchronized List<Payloads.PriceListEntry> priceListSnapshot() {
+        return buildPriceList();
+    }
+
+    /** Staleness guard for a bot's delayed turn action, mirroring onTurnTimeout's token check. */
+    synchronized boolean isTurnTokenCurrent(String playerId, int token) {
+        return status == Status.IN_PROGRESS && token == turnToken
+                && !turnOrder.isEmpty() && playerId.equals(turnOrder.get(currentTurnIndex));
+    }
+
+    /** Staleness guard for a bot's delayed shop action. */
+    synchronized boolean isShopTokenCurrent(int token) {
+        return status == Status.SHOP && token == shopToken;
     }
 
     /**

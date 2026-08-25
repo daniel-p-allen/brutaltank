@@ -1,5 +1,6 @@
 package com.brutaltank.lobby;
 
+import com.brutaltank.match.BotProfile;
 import com.brutaltank.match.Match;
 import com.brutaltank.match.MatchConfig;
 import com.brutaltank.match.MatchRegistry;
@@ -10,6 +11,10 @@ import com.brutaltank.protocol.Payloads;
 import com.brutaltank.util.MatchCodeGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -72,8 +77,30 @@ public final class LobbyManager {
         session.currentMatchId = matchId;
         session.playerToken = result.playerToken();
 
+        spawnBots(match, config.botCount(), config.botDifficulty());
+
         Envelopes.send(sink, mapper, "MatchCreated", requestId,
                 new Payloads.MatchCreated(matchId, match.joinCode, result.playerToken(), result.playerId()));
+    }
+
+    // Fixed name pool, shuffled per match so bots don't repeat names within
+    // one game; "Bot " prefix keeps them visually distinct in the roster
+    // even before the isBot badge renders.
+    private static final String[] BOT_NAME_POOL = {
+            "Rex", "Nova", "Ace", "Ivy", "Zed", "Coyote", "Diesel", "Ghost"
+    };
+
+    private void spawnBots(Match match, int botCount, com.brutaltank.match.Difficulty difficulty) {
+        if (botCount <= 0) {
+            return;
+        }
+        List<String> names = new java.util.ArrayList<>(Arrays.asList(BOT_NAME_POOL));
+        Collections.shuffle(names);
+        Random rng = new Random();
+        for (int i = 0; i < botCount; i++) {
+            String name = "Bot " + (i < names.size() ? names.get(i) : (i + 1));
+            match.addBot(name, BotProfile.forDifficulty(difficulty, rng));
+        }
     }
 
     public void handleJoinMatch(PlayerSession session, MessageSink sink, String requestId, Payloads.JoinMatch payload) {

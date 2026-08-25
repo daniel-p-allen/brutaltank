@@ -54,7 +54,8 @@ class WeaponAndShieldTest {
     }
 
     private Match newMatch(String id) {
-        Match m = new Match(id, MAPPER, new MatchConfig(4, 8), scheduler);
+        Match m = new Match(id, MAPPER,
+                new MatchConfig(4, 8, MatchConfig.DEFAULT_BOT_COUNT, MatchConfig.DEFAULT_BOT_DIFFICULTY), scheduler);
         m.setTurnTimeoutMs(30_000);
         return m;
     }

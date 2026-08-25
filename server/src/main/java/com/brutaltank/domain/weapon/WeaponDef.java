@@ -74,8 +74,14 @@ public record WeaponDef(
     // missile is the roster's lightest item, weight-class 1 of 3; see
     // client WEAPON_CATALOG's weightClass, kept in sync by hand same as
     // label/id already are) — flies flatter/farther than a dumb-fired shell.
+    // price 0->60 (per live-playtest feedback, 2026-08-25: "baby missiles
+    // are bloody free"): the starting loadout (defaultQty 5) is still free —
+    // WeaponDef.price only matters for shop resupply, and unpriced terminal
+    // homing ammo was a clear balance hole. 60 undercuts every other
+    // purchasable weapon (Digger's 120 is next-cheapest) since it's still
+    // the lightest/weakest-blast item in the roster.
     public static final WeaponDef BABY_MISSILE =
-            new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 36.0, 0, 5,
+            new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 36.0, 60, 5,
                     1.15, 0.85, 1.0, 0.0, 20, 0.06);
 
     // gravityMultiplier bumped 1.1->1.2 (weight-class 3 of 3, heaviest tier
@@ -83,8 +89,13 @@ public record WeaponDef(
     // power/45deg is still ~3941 world-units, comfortably clearing the
     // 1600-unit map (per user request: "make sure the heaviest item can be
     // thrown clear across the field").
+    // centerDamage/blastRadius pulled back 80/45 -> 60/38 (per live-playtest
+    // feedback, 2026-08-25: "tone down the heavy cannonball a bit.. it is
+    // devastating") — still the roster's second-hardest hitter behind Nuke,
+    // just not disproportionate to its $150 price relative to pricier
+    // weapons like Napalm/Tunneling Shot/Bouncing Betty.
     public static final WeaponDef HEAVY_CANNONBALL =
-            new WeaponDef("heavy_cannonball", Behavior.STANDARD, 45.0, 80.0, 150, 3,
+            new WeaponDef("heavy_cannonball", Behavior.STANDARD, 38.0, 60.0, 150, 3,
                     0.85, 1.2, 1.3, 0.0, 10, 0.0);
 
     public static final WeaponDef MIRV =
