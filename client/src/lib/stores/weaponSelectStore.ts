@@ -43,23 +43,49 @@ export interface WeaponCatalogEntry {
 	 * Shields have no damage rating (never deal direct damage themselves).
 	 */
 	centerDamage?: number;
+	/**
+	 * Blast radius, mirrored by hand from WeaponDef.blastRadius (weapons)
+	 * or the fixed shield-cost table (PLAN.md 4.4's shield table — shields
+	 * have no blast radius, this stays undefined for them). Shown on the
+	 * hover info card only (2026-08-25) — not on the always-visible chip
+	 * face, to avoid crowding it further.
+	 */
+	blastRadius?: number;
+	/**
+	 * Shop price, mirrored by hand from WeaponDef.price/ShieldDef.price.
+	 * 0 means "free to resupply" (Basic Shell only — excluded from the shop
+	 * entirely, see PLAN.md 4.5, but still worth showing as "Free" on its
+	 * info card). Shown on the hover info card only.
+	 */
+	price?: number;
 }
 
 export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
-	{ id: 'basic_shell', label: 'Basic Shell', isShield: false, weightClass: 2, centerDamage: 50 },
-	{ id: 'baby_missile', label: 'Baby Missile', isShield: false, weightClass: 1, centerDamage: 36 },
-	{ id: 'heavy_cannonball', label: 'Heavy Cannonball', isShield: false, weightClass: 3, centerDamage: 60 },
-	{ id: 'mirv', label: 'MIRV', isShield: false, weightClass: 2, centerDamage: 30 },
-	{ id: 'napalm', label: 'Napalm', isShield: false, weightClass: 2, centerDamage: 40 },
-	{ id: 'tunneling_shot', label: 'Tunneling Shot', isShield: false, weightClass: 2, centerDamage: 60 },
-	{ id: 'bouncing_betty', label: 'Bouncing Betty', isShield: false, weightClass: 1, centerDamage: 50 },
-	{ id: 'cluster_bomb', label: 'Cluster Bomb', isShield: false, weightClass: 2, centerDamage: 80 },
-	{ id: 'digger', label: 'Digger', isShield: false, weightClass: 3, centerDamage: 20 },
-	{ id: 'nuke', label: 'Nuke', isShield: false, weightClass: 3, centerDamage: 190 },
-	{ id: 'absorb_shield', label: 'Absorb Shield', isShield: true },
-	{ id: 'deflect_shield', label: 'Deflect Shield', isShield: true },
-	{ id: 'reflect_shield', label: 'Reflect Shield', isShield: true }
+	{ id: 'basic_shell', label: 'Basic Shell', isShield: false, weightClass: 2, centerDamage: 50, blastRadius: 30, price: 0 },
+	{ id: 'baby_missile', label: 'Baby Missile', isShield: false, weightClass: 1, centerDamage: 36, blastRadius: 22, price: 200 },
+	{ id: 'heavy_cannonball', label: 'Heavy Cannonball', isShield: false, weightClass: 3, centerDamage: 60, blastRadius: 38, price: 150 },
+	{ id: 'mirv', label: 'MIRV', isShield: false, weightClass: 2, centerDamage: 30, blastRadius: 25, price: 300 },
+	{ id: 'napalm', label: 'Napalm', isShield: false, weightClass: 2, centerDamage: 40, blastRadius: 50, price: 250 },
+	{ id: 'tunneling_shot', label: 'Tunneling Shot', isShield: false, weightClass: 2, centerDamage: 60, blastRadius: 25, price: 200 },
+	{ id: 'bouncing_betty', label: 'Bouncing Betty', isShield: false, weightClass: 1, centerDamage: 50, blastRadius: 30, price: 220 },
+	{ id: 'cluster_bomb', label: 'Cluster Bomb', isShield: false, weightClass: 2, centerDamage: 80, blastRadius: 20, price: 280 },
+	{ id: 'digger', label: 'Digger', isShield: false, weightClass: 3, centerDamage: 20, blastRadius: 38, price: 120 },
+	{ id: 'nuke', label: 'Nuke', isShield: false, weightClass: 3, centerDamage: 190, blastRadius: 90, price: 600 },
+	{ id: 'absorb_shield', label: 'Absorb Shield', isShield: true, price: 200 },
+	{ id: 'deflect_shield', label: 'Deflect Shield', isShield: true, price: 250 },
+	{ id: 'reflect_shield', label: 'Reflect Shield', isShield: true, price: 300 }
 ];
+
+/**
+ * Two-word "what it does" blurb per shield, shown on the hover info card.
+ * Mirrors ShopOverlay.svelte's SHIELD_BLURBS by hand (same text, kept in
+ * sync manually — same convention as every other catalog field above).
+ */
+export const SHIELD_EFFECT_BLURB: Record<string, string> = {
+	absorb_shield: 'Halves damage',
+	deflect_shield: 'Blocks once',
+	reflect_shield: 'Refunds cash'
+};
 
 /** Nuke's rating (190) — the roster max the damage pie scales against. Kept in sync by hand alongside the table above. */
 export const MAX_DAMAGE_RATING = 190;
