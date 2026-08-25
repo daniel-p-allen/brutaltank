@@ -420,6 +420,22 @@ Live-playtest notes surfaced 6 items; investigated all before fixing.
    (a ghost/disconnected player's client stops receiving broadcasts) rather
    than its own bug — no fix applied pending a repro (match code + rough
    timing).
+   **Third check, 2026-08-25 — live Playwright repro, also found nothing
+   wrong.** New hypothesis tested specifically: that "other players" in
+   the report meant *bots*, since this session's bot-vs-human play is
+   where the report likely originated, and only human-vs-human purchase
+   visibility had been reasoned about before. Ran a real browser against
+   the actual dev servers (human + 1 HARD bot, WebSocket frames captured
+   via a `window.WebSocket` monkeypatch), let the bot autonomously buy
+   into the shop phase, and watched the human client's own DOM stock
+   text update from `20 left` → `18 left` within the first ~2.5s poll,
+   exactly matching 3 `ShopUpdate` frames the human client received for
+   the bot's purchases (`baby_missile: 20→19→18`), with no purchase
+   action taken by the human side at all. Live behavior matches the code
+   reading: bot purchases sync to a connected human's shop UI correctly.
+   Two independent code reads plus this live behavioral test have now all
+   failed to find a defect — still no fix applied; still needs a genuine
+   repro (exact match code + timing + who bought what) if it recurs.
 
 **Not a bug, noted and left as-is:**
 6. **"instead of just a slider"** — the note as given was cut off with no
