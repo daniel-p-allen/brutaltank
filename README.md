@@ -4,7 +4,7 @@ A turn-based, multiplayer 2D artillery game — a modernized remake in the spiri
 
 **Status: M0-M4 shipped** (scaffolding, lobby/match core, weapons/shields, terrain destruction, shop/economy). See `PLAN.md` section 5 for milestone definitions and `CLAUDE.md` for a running log of what's been built and fixed session to session.
 
-See `PLAN.md` for the full design/implementation plan and `docs/architecture.md` for the living copy of it.
+See `PLAN.md` for the full design/implementation plan (including the open bugs/features backlog) and `docs/architecture.md` for the living copy of it. Completed backlog items live in `PLAN_ARCHIVE.md`.
 
 ## Target platform
 

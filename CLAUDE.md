@@ -4,12 +4,20 @@
 
 - `PLAN.md` (repo root) — the full design/implementation plan: architecture,
   protocol summary, gameplay systems, weapon/shield tables, milestone
-  roadmap (M0-M6), testing approach.
+  roadmap (M0-M6), testing approach, and a "Future ideas" backlog of
+  **open** bugs/features only (see `PLAN_ARCHIVE.md` below).
+- `PLAN_ARCHIVE.md` (repo root, new 2026-08-25) — every bug/feature/
+  decision item that started in `PLAN.md`'s Future Ideas backlog and has
+  since been fully implemented, fixed, or explicitly closed. Moved out of
+  `PLAN.md` so that file stays a list of genuinely open work — check this
+  archive first before assuming something needs re-investigating or
+  re-building.
 - `shared/protocol.md` — the canonical, hand-maintained WebSocket message
   schema. Source of truth for every message shape; both `server/` and
   `client/` implement it by hand (no codegen).
 - `docs/architecture.md` — a living copy of `PLAN.md`; keep both in sync if
-  editing either.
+  editing either. (`PLAN_ARCHIVE.md` is not mirrored into `docs/` — it's a
+  standalone historical record, not part of the living architecture doc.)
 - `README.md` — quickstart/dev workflow, also points at the two files above.
 
 **Note to self (past session hit this):** a `Glob` call for `**/PLAN.md` or
