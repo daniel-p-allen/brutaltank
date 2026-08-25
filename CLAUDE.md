@@ -608,3 +608,47 @@ Future Ideas entry; short version of what the audit found and what shipped:
   `PLAN.md` as a distinct "match difficulty" concept from bot skill
   difficulty, needing its own scoping conversation (wind affects every
   player equally per turn, it isn't per-bot).
+
+## 2026-08-25 session part 4: architecture blueprint refresh, two more filed items
+
+User pointed at `docs/brutaltank-blueprint.pdf` (a polished multi-page
+diagram doc, last generated 2026-08-21 at commit `469b92c`) and asked for
+an updated equivalent covering everything since — bots and the physics
+audit above being the two big ones. Built as a new Claude Design canvas
+(8 landscape pages: cover, system overview, server domain model, a new
+dedicated bots-subsystem page, client component/store map, match
+lifecycle, a new dedicated physics/rendering-audit page, and a refreshed
+"filed, not built" list), matching the PDF's visual style from the
+reference image the user attached (condensed display headline font,
+cream/grid background, color-coded bordered boxes: orange=client,
+blue=server, gray=domain, red=broadcast/flagged, plus a new violet=new-
+this-pass accent). Published at
+`https://claude.ai/code/artifact/6bed76eb-484a-48fe-b89c-a95656dc3202`.
+Also corrected several claims that had gone stale since the 08-21 PDF
+independent of this session's own changes (Bouncing Betty per-bounce
+damage is real not cosmetic, per-weapon sound design shipped, Napalm has
+its own explosion effect) and fixed the shop-timeout figure (was shown as
+30s, actually 600s). One real bug caught and fixed during a self-review
+pass before publishing: two CSS spacer divs on the domain-model page had
+only their *text* hidden (`visibility:hidden` on the `<h4>`/`<p>`, not the
+container), so they rendered as visible empty boxes — fixed by removing
+them instead of trying to hide a whole box that didn't need to exist.
+
+Two more items surfaced by the user mid-session, both filed in `PLAN.md`,
+neither built:
+- **Connection/access log for troubleshooting at scale** — every join
+  attempt logged (IP, user-agent, timestamp), low-resource flat text,
+  date-linked entries, for troubleshooting under real player load. Real
+  open questions before scoping: exact event set, how to get the real
+  client IP through the nginx TLS proxy (`X-Forwarded-For`, not the
+  proxy's own IP), file rotation/retention policy, and a privacy pass
+  since it would capture player IPs.
+- **Bug, not yet investigated: Baby Missile + favorable wind, trajectory
+  help preview disagrees with the real shot in the wrong direction.**
+  User report: real shot landed *short of* the preview line, not past it,
+  despite wind blowing in their favor. Leading theory (unconfirmed): the
+  preview (`trajectoryPreview.ts`) already deliberately ignores wind, but
+  Baby Missile is also the one weapon with nonzero `homingStrength` — the
+  preview almost certainly doesn't model homing either, and a live target
+  within homing range during descent could pull the real shot short
+  independent of wind. Needs real investigation next time, not fixed.
