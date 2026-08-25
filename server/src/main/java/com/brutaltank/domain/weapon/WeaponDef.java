@@ -77,11 +77,12 @@ public record WeaponDef(
     // price 0->60 (per live-playtest feedback, 2026-08-25: "baby missiles
     // are bloody free"): the starting loadout (defaultQty 5) is still free —
     // WeaponDef.price only matters for shop resupply, and unpriced terminal
-    // homing ammo was a clear balance hole. 60 undercuts every other
-    // purchasable weapon (Digger's 120 is next-cheapest) since it's still
-    // the lightest/weakest-blast item in the roster.
+    // homing ammo was a clear balance hole. Then 60->200 (explicit user
+    // request, 2026-08-25) -- now priced above Digger (120) and MIRV (per
+    // its own price), reflecting its homing/terminal-guidance advantage
+    // rather than just its lightest/weakest-blast stats.
     public static final WeaponDef BABY_MISSILE =
-            new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 36.0, 60, 5,
+            new WeaponDef("baby_missile", Behavior.STANDARD, 22.0, 36.0, 200, 5,
                     1.15, 0.85, 1.0, 0.0, 20, 0.06);
 
     // gravityMultiplier bumped 1.1->1.2 (weight-class 3 of 3, heaviest tier
