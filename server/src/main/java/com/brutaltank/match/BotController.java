@@ -33,6 +33,13 @@ final class BotController {
     private static final long DEFAULT_TURN_DELAY_MAX_MS = 4500;
     private static final long DEFAULT_SHOP_DELAY_MIN_MS = 800;
     private static final long DEFAULT_SHOP_DELAY_MAX_MS = 3300;
+    // Gap between broadcasting the bot's aim (turret visibly snaps to it,
+    // same PlayerAiming broadcast a human's slider drag sends) and actually
+    // firing -- without this, a bot's aim+fire happened in the same instant
+    // and the turret never appeared to move before the shot left (live
+    // playtest report, 2026-08-25: "the turrets of the tanks of the bots
+    // are not seen to move and aim").
+    private static final long DEFAULT_AIM_TO_FIRE_DELAY_MS = 500;
 
     private final Match match;
     private final ScheduledExecutorService scheduler;
@@ -42,6 +49,7 @@ final class BotController {
     private final long turnDelayMaxMs;
     private final long shopDelayMinMs;
     private final long shopDelayMaxMs;
+    private final long aimToFireDelayMs;
 
     /** {@code overrideMinMs}/{@code overrideMaxMs} < 0 means "use the production defaults for both turn and shop delays" (see Match#setBotThinkDelayRangeMs). */
     BotController(Match match, ScheduledExecutorService scheduler, long overrideMinMs, long overrideMaxMs) {
@@ -52,11 +60,18 @@ final class BotController {
             this.turnDelayMaxMs = overrideMaxMs;
             this.shopDelayMinMs = overrideMinMs;
             this.shopDelayMaxMs = overrideMaxMs;
+            // Same override also shrinks the aim-to-fire gap -- otherwise a
+            // fixed 500ms per turn (unaffected by the fast-test override)
+            // multiplied across MAX_TURNS_PER_ROUND's 60-turn safety cap
+            // blew well past integration tests' short deadlines even though
+            // every turn was resolving normally, not hanging.
+            this.aimToFireDelayMs = overrideMinMs;
         } else {
             this.turnDelayMinMs = DEFAULT_TURN_DELAY_MIN_MS;
             this.turnDelayMaxMs = DEFAULT_TURN_DELAY_MAX_MS;
             this.shopDelayMinMs = DEFAULT_SHOP_DELAY_MIN_MS;
             this.shopDelayMaxMs = DEFAULT_SHOP_DELAY_MAX_MS;
+            this.aimToFireDelayMs = DEFAULT_AIM_TO_FIRE_DELAY_MS;
         }
     }
 
@@ -99,7 +114,14 @@ final class BotController {
         BotAimPlanner.Plan plan = BotAimPlanner.plan(
                 match.terrainSnapshot(), self, all, match.windStrength(),
                 match.loadoutSnapshot(playerId), profile, random);
-        match.fire(playerId, null, plan.weaponId(), plan.angleDeg(), plan.power(), false);
+
+        match.updateAim(playerId, plan.angleDeg());
+        scheduler.schedule(() -> {
+            if (!match.isTurnTokenCurrent(playerId, expectedToken)) {
+                return;
+            }
+            match.fire(playerId, null, plan.weaponId(), plan.angleDeg(), plan.power(), false);
+        }, aimToFireDelayMs, TimeUnit.MILLISECONDS);
     }
 
     private void takeShopTurn(String playerId, BotProfile profile, int expectedShopToken) {

@@ -152,8 +152,17 @@ class ProjectileSimTest {
         // first ground contact (<=25deg incidence) gets the 5-bounce
         // ceiling. A 15deg launch, close to the ground, lands at ~18deg
         // incidence -- flat tier.
+        // power=50 (not e.g. 70): high enough to still reach the 5-bounce
+        // ceiling, but low enough that neither shot's raw distance
+        // approaches the 1600-unit map width -- at higher power one or both
+        // wrap around the cyclic map (ProjectileSim's "Screen wrap"
+        // behavior), and impactX is the post-wrap value, so the "farther"
+        // comparison below becomes meaningless noise once wrap enters the
+        // picture (confirmed empirically after the 2026-08-25 POWER_SCALE
+        // retune: this test flaked at power=70 purely from wrap, not an
+        // actual behavior regression).
         Terrain terrain = flatTerrain(500);
-        ProjectileSim.Result result = ProjectileSim.simulate(50, 450, 15, 70, 0, terrain,
+        ProjectileSim.Result result = ProjectileSim.simulate(50, 450, 15, 50, 0, terrain,
                 Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.BOUNCING, 1.0, 1.0, false);
 
         assertEquals(5, result.bounceCount, "flat first contact should reach the 5-bounce ceiling");
@@ -161,7 +170,7 @@ class ProjectileSimTest {
         // A bouncing shot should travel farther than an equivalent standard shot
         // fired at the same shallow angle, since it skips instead of stopping.
         Terrain standardTerrain = flatTerrain(500);
-        ProjectileSim.Result standard = ProjectileSim.simulate(50, 450, 15, 70, 0, standardTerrain,
+        ProjectileSim.Result standard = ProjectileSim.simulate(50, 450, 15, 50, 0, standardTerrain,
                 Collections.emptyList(), com.brutaltank.domain.weapon.WeaponDef.Behavior.STANDARD, 1.0, 1.0, false);
         assertTrue(result.impactX > standard.impactX,
                 "bouncing shot should travel farther: bounced=" + result.impactX + " standard=" + standard.impactX);

@@ -538,3 +538,73 @@ identity system, and this being the *first* genuinely persistent data this
 project would ever need — everything today lives only in server memory and
 vanishes on restart). Needs a real conversation with the user before
 scoping, not a design-by-assumption.
+
+## 2026-08-25 session part 3: weapon physics/rendering audit after live bot playtest
+
+Follow-up the same day: user actually played against bots and reported four
+real problems (bot turrets not visibly aiming, MIRV still flying backwards
+after a split, shots "crossing the screen twice" before landing, Digger/
+Tunneling still not visibly tunneling) plus a separate wind complaint (feels
+too strong at max strength). Investigated with an actual physics audit
+(`ProjectileSim.simulate` swept across every weapon x angle x power on flat
+terrain — a real data-gathering pass, not guessing) before touching any
+code. Full detail in `PLAN.md`'s "Weapon physics/rendering audit and fixes"
+Future Ideas entry; short version of what the audit found and what shipped:
+
+- **The audit's key finding**: range scales ~power^2 (normal ballistics),
+  and `ProjectileSim.POWER_SCALE=12.0` (doubled in an earlier session,
+  2026-08-22) was tuned high enough that most weapons already wrapped the
+  1600-unit cyclic map 1-4 times at power >=75/45deg. Bots' grid search
+  (`BotAimPlanner.findBestShot`) didn't discriminate a direct hit from a
+  hit reached by wrapping the map — that's the literal root cause of "how
+  can they have so much power," and a wrapping shot is exactly the
+  condition that exposes any wrap-unaware rendering code (which is also
+  exactly what the MIRV bug turned out to be — see below).
+- **Asked the user explicitly** whether to touch the human-facing power
+  curve too, since it was a deliberate past tuning choice ("today's max
+  power should become the new 50% mark"). Answer: yes, but at roughly half
+  the correction bots get — bots get fully constrained to never pick a
+  wrapping solution, humans get a real but smaller cut, explicitly framed
+  as "we will test it and see if it feels right" (first-pass tuning, not
+  presented as final).
+- **Six fixes shipped, all server/client tests green + a live WS-frame-level
+  re-verification against the real dev servers** (Playwright, intercepting
+  the actual WebSocket frames rather than just visual inspection — confirmed
+  `PlayerAiming` now broadcasts for bots, and bot-fired shots show no
+  wrap-sized trajectory jump while an unrelated human default-slider shot
+  did wrap once from wind, which is expected/acceptable since humans keep
+  the toned-down wrap mechanic by design):
+  1. Bot turret-aim fix (`BotController` now calls `Match.updateAim` before
+     firing, with a short pause).
+  2. MIRV backwards-after-split fix (`shortestWrapDx`, factored out of the
+     earlier `lerpWrappedX` fix, now also used in the fall-phase `vx0` solve
+     — this was a *second*, separate instance of the same wrap bug class,
+     not a regression of the first fix).
+  3. `BotAimPlanner` now analytically pre-filters out any grid candidate
+     that would require wrapping the map (the map is only 1600 units wide,
+     so a wrap is never actually *necessary* to reach any target, only
+     possible at high power).
+  4. `POWER_SCALE` 12.0 -> 9.0, `MAX_WIND_VX_CONTRIBUTION` 300 -> 225 (scaled
+     proportionally so wind's cap-relative-to-shot-velocity relationship
+     stays consistent).
+  5. `WIND_ACCEL_PER_STRENGTH` 4.0 -> 2.5 (confirmed linear when the user
+     asked — no curve to speak of).
+  6. New `Terrain.carveTunnelSegment` (max-based, path-following, replaces
+     the old additive-crater bore track for Digger/Tunneling Shot's
+     underground segments only — their final crater is unaffected) so the
+     visible tunnel actually traces the trajectory instead of over/under-
+     digging from overlapping additive craters.
+- **A real gotcha worth remembering**: after the `POWER_SCALE` retune, three
+  existing tests broke — not from a code bug, but because their specific
+  hardcoded power values happened to cross a map-wrap boundary once ranges
+  shrank, making an `impactX > otherImpactX` comparison meaningless (both
+  are post-wrap-modulo values). Fixed by choosing test power values that
+  stay safely under one map-width for both compared shots, with a comment
+  explaining why — worth keeping in mind for any *future* `POWER_SCALE`
+  retune too, since any test asserting on raw `impactX` distances is
+  implicitly coupled to the map not wrapping during that specific shot.
+- **Also filed, not built**: wind scaled to a match/bot difficulty setting
+  (user's alternate idea, raised alongside the wind complaint) — flagged in
+  `PLAN.md` as a distinct "match difficulty" concept from bot skill
+  difficulty, needing its own scoping conversation (wind affects every
+  player equally per turn, it isn't per-bot).

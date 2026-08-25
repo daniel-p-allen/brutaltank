@@ -55,12 +55,20 @@ const NAPALM_FLAME_COUNT = 6;
 // looked exactly like "flew off the left edge, then shot backwards over the
 // firer to the other side" (bug report, MIRV/Digger — anything with enough
 // range to wrap). Fixed by lerping along the *shorter* wrapped path instead.
-function lerpWrappedX(ax: number, bx: number, t: number): number {
+/** The shorter of the two ways to get from ax to bx around the cyclic map. Exported for testing (also used by the MIRV fall-phase vx0 solve in drawProjectile). */
+export function shortestWrapDx(ax: number, bx: number): number {
 	let dx = bx - ax;
 	if (dx > WORLD_WIDTH / 2) dx -= WORLD_WIDTH;
 	else if (dx < -WORLD_WIDTH / 2) dx += WORLD_WIDTH;
-	const x = ax + dx * t;
+	return dx;
+}
+
+function wrapX(x: number): number {
 	return ((x % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH;
+}
+
+function lerpWrappedX(ax: number, bx: number, t: number): number {
+	return wrapX(ax + shortestWrapDx(ax, bx) * t);
 }
 
 /** Returns a point along the (already resampled) trajectory for a given 0..1 progress. */
@@ -228,9 +236,17 @@ export function drawProjectile(
 		const tSec = Math.max(0, (elapsedMs - PROJECTILE_ANIMATION_DURATION_MS) / 1000);
 		const totalSec = MIRV_FALL_DURATION_MS / 1000;
 		for (const impact of impacts) {
-			const vx0 = (impact.x - splitPoint.x) / totalSec;
+			// A child's impact can be on the far side of a map wrap from the
+			// split point (ProjectileSim lets shots wrap the cyclic map
+			// mid-flight) -- solving vx0 from a raw impact.x - splitPoint.x
+			// subtraction in that case produced a huge spurious backward
+			// velocity, reading as "flies backwards counter to physics"
+			// right after the split (live playtest report, 2026-08-25).
+			// Solve along the shorter wrapped path instead.
+			const dx = shortestWrapDx(splitPoint.x, impact.x);
+			const vx0 = dx / totalSec;
 			const vy0 = (impact.y - splitPoint.y - 0.5 * MIRV_FALL_GRAVITY * totalSec * totalSec) / totalSec;
-			const worldX = splitPoint.x + vx0 * tSec;
+			const worldX = wrapX(splitPoint.x + vx0 * tSec);
 			const worldY = splitPoint.y + vy0 * tSec + 0.5 * MIRV_FALL_GRAVITY * tSec * tSec;
 			const { x, y } = worldToCanvas(worldX, worldY, viewport);
 			ctx.beginPath();

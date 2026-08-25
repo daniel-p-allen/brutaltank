@@ -40,6 +40,55 @@ class TerrainTest {
     }
 
     @Test
+    void carveTunnelSegmentDigsToTargetAtCenterAndTapersAtEdge() {
+        int[] flat = new int[400];
+        java.util.Arrays.fill(flat, 300);
+        Terrain terrain = new Terrain(flat);
+
+        terrain.carveTunnelSegment(200, 400, 10);
+
+        assertEquals(400, terrain.heightAt(200), "center column should be carved exactly down to the segment's target Y");
+        assertEquals(300, terrain.heightAt(210), "at the radius edge the segment shouldn't change anything");
+        assertEquals(300, terrain.heightAt(190));
+    }
+
+    @Test
+    void carveTunnelSegmentNeverRaisesTerrainThatsAlreadyDeeperThanTheTarget() {
+        int[] flat = new int[400];
+        java.util.Arrays.fill(flat, 450); // already deeper than the segment we're about to carve
+        Terrain terrain = new Terrain(flat);
+
+        terrain.carveTunnelSegment(200, 400, 10);
+
+        assertEquals(450, terrain.heightAt(200), "carving toward a shallower target must not fill terrain back in");
+    }
+
+    @Test
+    void repeatedOverlappingCarvesConvergeOnTheDeepestNearbyTargetNoOverDig() {
+        int[] flat = new int[400];
+        java.util.Arrays.fill(flat, 300);
+        Terrain terrain = new Terrain(flat);
+
+        // Two overlapping segments a few columns apart, simulating a
+        // descending path -- x=195 should end up carved by whichever
+        // segment's falloff-blended target reaches deepest there, not by
+        // both additively (the old bug: overlapping additive digs at
+        // adjacent columns compounded into an over-deep, jagged pit instead
+        // of tracing the path).
+        terrain.carveTunnelSegment(190, 350, 10);
+        terrain.carveTunnelSegment(200, 400, 10);
+
+        int overlapHeight = terrain.heightAt(195);
+        assertTrue(overlapHeight <= 400, "overlap column shouldn't dig deeper than the deepest nearby segment's own target: " + overlapHeight);
+
+        // Calling the exact same segment again must be a no-op (idempotent),
+        // not an additional dig on top of what's already there.
+        int before = terrain.heightAt(200);
+        terrain.carveTunnelSegment(200, 400, 10);
+        assertEquals(before, terrain.heightAt(200), "re-carving the same segment must not dig any deeper");
+    }
+
+    @Test
     void craterNearEdgeOfWorldClampsColumnRange() {
         int[] flat = new int[400];
         java.util.Arrays.fill(flat, 300);

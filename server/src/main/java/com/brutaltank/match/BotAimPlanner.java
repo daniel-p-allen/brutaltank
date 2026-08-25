@@ -92,6 +92,16 @@ final class BotAimPlanner {
             double startX = self.x() + Math.cos(angleRad) * Match.BARREL_LENGTH;
             double startY = turretY - Math.sin(angleRad) * Match.BARREL_LENGTH;
             for (double power : POWER_CANDIDATES) {
+                // The map is only terrain.width() wide, so any target is
+                // reachable without ever wrapping around it -- a wrap is
+                // never actually necessary, only possible at high power.
+                // Skip candidates that would wrap: without this, the search
+                // was picking "shell flies across the whole screen twice"
+                // solutions purely because they happened to land close after
+                // wrapping (live playtest report, 2026-08-25).
+                if (Math.abs(estimateVacuumRange(angleRad, power, weapon)) > terrain.width()) {
+                    continue;
+                }
                 ProjectileSim.Result result = ProjectileSim.simulate(startX, startY, angleDeg, power,
                         windStrength, terrain, targets, weapon.behavior(),
                         weapon.powerScaleMultiplier(), weapon.gravityMultiplier(), false);
@@ -110,6 +120,16 @@ final class BotAimPlanner {
             }
         }
         return new double[] {bestAngle, bestPower};
+    }
+
+    /** Cheap vacuum-ballistics range estimate (no terrain/bounce/tunnel effects) -- just enough to reject candidates that would wrap the map. */
+    private static double estimateVacuumRange(double angleRad, double power, WeaponDef weapon) {
+        double v = power * ProjectileSim.POWER_SCALE * weapon.powerScaleMultiplier();
+        double vx = v * Math.cos(angleRad);
+        double vy0 = v * Math.sin(angleRad);
+        double g = ProjectileSim.GRAVITY * weapon.gravityMultiplier();
+        double hangtime = 2 * vy0 / g;
+        return vx * hangtime;
     }
 
     private static String chooseWeapon(Map<String, Integer> loadout, BotProfile profile, Random rng) {

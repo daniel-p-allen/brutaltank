@@ -105,6 +105,50 @@ public final class Terrain {
         return new CraterResult(startX, endX, delta);
     }
 
+    /**
+     * Carves the surface down to follow a specific point along a tunneling
+     * weapon's actual underground path, instead of digging a fixed depth
+     * relative to whatever the terrain height already is there.
+     *
+     * <p>{@link #applyCrater} is additive ({@code heights[x] += depth}), which
+     * is right for a single blast but wrong for a dense sequence of
+     * overlapping calls along a path (Digger/Tunneling Shot's bore track,
+     * one call per raw simulation step underground): overlapping additive
+     * digs either compound into an over-deep pit where columns are hit
+     * multiple times, or leave gaps where they aren't, never cleanly
+     * tracing the real curve — the reported "tunnel doesn't follow where
+     * the projectile went" (live playtest, 2026-08-25).
+     *
+     * <p>This takes the <em>max</em> of the column's current height and a
+     * falloff-blended {@code targetY} (this segment's actual world-Y — a
+     * larger value, since this convention's "deeper" is numerically larger)
+     * instead. Repeated overlapping calls along a descending path then
+     * converge on exactly "the deepest the path got near this column" —
+     * the surface literally traces the trajectory's descending envelope,
+     * with no over-dig from overlap (max is idempotent) and no gaps
+     * (adjacent segments' falloff radii cover the columns between them).
+     */
+    public CraterResult carveTunnelSegment(int centerX, double targetY, double radius) {
+        int r = (int) Math.ceil(radius);
+        int startX = Math.max(0, centerX - r);
+        int endX = Math.min(heights.length - 1, centerX + r);
+
+        for (int x = startX; x <= endX; x++) {
+            double dist = Math.abs(x - centerX);
+            if (dist > radius) {
+                continue;
+            }
+            double falloff = 1.0 - (dist / radius) * (dist / radius);
+            double blendedTarget = heights[x] + (targetY - heights[x]) * Math.max(0.0, falloff);
+            int newHeight = (int) Math.round(Math.max(heights[x], blendedTarget));
+            heights[x] = clamp(newHeight);
+        }
+
+        int[] delta = new int[endX - startX + 1];
+        System.arraycopy(heights, startX, delta, 0, delta.length);
+        return new CraterResult(startX, endX, delta);
+    }
+
     private static final int SETTLE_MAX_SLOPE = 10;
     private static final int SETTLE_PADDING = 60;
     private static final int SETTLE_MAX_ITERATIONS = 40;

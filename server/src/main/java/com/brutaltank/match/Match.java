@@ -1029,9 +1029,19 @@ public final class Match {
      * shared/protocol.md 4 ("this document does not mandate a separate
      * per-child sub-message at v1").
      */
-    private record DetonationSpec(double x, double y, double blastRadius, double centerDamage, double craterDepthMultiplier) {
+    private record DetonationSpec(double x, double y, double blastRadius, double centerDamage,
+                                   double craterDepthMultiplier, boolean isTunnelSegment) {
         DetonationSpec(double x, double y, double blastRadius, double centerDamage) {
-            this(x, y, blastRadius, centerDamage, 1.0);
+            this(x, y, blastRadius, centerDamage, 1.0, false);
+        }
+
+        DetonationSpec(double x, double y, double blastRadius, double centerDamage, double craterDepthMultiplier) {
+            this(x, y, blastRadius, centerDamage, craterDepthMultiplier, false);
+        }
+
+        /** A zero-damage bore-track point along a TUNNELING weapon's underground path -- see Terrain#carveTunnelSegment. */
+        static DetonationSpec tunnelSegment(double x, double y, double radius) {
+            return new DetonationSpec(x, y, radius, 0, 1.0, true);
         }
     }
 
@@ -1154,7 +1164,7 @@ public final class Match {
                 // visibly follows the real curved trajectory instead of
                 // reading as nothing at all next to the final crater.
                 for (double[] point : sim.undergroundPath) {
-                    detonations.add(new DetonationSpec(point[0], point[1], TUNNEL_TRACK_RADIUS, 0));
+                    detonations.add(DetonationSpec.tunnelSegment(point[0], point[1], TUNNEL_TRACK_RADIUS));
                 }
                 detonations.add(new DetonationSpec(sim.impactX, sim.impactY, weapon.blastRadius(), weapon.centerDamage(),
                         weapon.craterDepthMultiplier()));
@@ -1374,8 +1384,14 @@ public final class Match {
         }
 
         for (DetonationSpec d : detonations) {
-            Terrain.CraterResult crater = terrain.applyCrater(
-                    (int) Math.round(d.x()), d.blastRadius(), d.craterDepthMultiplier());
+            // Tunnel-track segments carve toward the projectile's actual
+            // underground world-Y at that point (see Terrain#carveTunnelSegment's
+            // doc) instead of the generic additive blast dig -- every other
+            // detonation (including this same shot's own final crater) is
+            // unaffected.
+            Terrain.CraterResult crater = d.isTunnelSegment()
+                    ? terrain.carveTunnelSegment((int) Math.round(d.x()), d.y(), d.blastRadius())
+                    : terrain.applyCrater((int) Math.round(d.x()), d.blastRadius(), d.craterDepthMultiplier());
             minStart = Math.min(minStart, crater.startX());
             maxEnd = Math.max(maxEnd, crater.endX());
 

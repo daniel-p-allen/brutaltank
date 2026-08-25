@@ -93,7 +93,12 @@ class BotAimPlannerTest {
         Terrain terrain = flatTerrain(500);
         Match.TankSnapshot self = new Match.TankSnapshot("bot", 200, 500, 100, true, null);
         Match.TankSnapshot target = new Match.TankSnapshot("human", 900, 500, 100, true, null);
-        int realWind = 15;
+        // Deliberately well beyond WIND_MAX (10) -- ProjectileSim.simulate
+        // itself doesn't clamp windStrength, and a strong push is needed
+        // here to get a clean signal above grid-quantization noise now that
+        // WIND_ACCEL_PER_STRENGTH is tuned down (2026-08-25 playtest
+        // feedback: "wind... seems very strong", toned down 4.0->2.5).
+        int realWind = 30;
 
         BotProfile windBlind = profile(Difficulty.MEDIUM, 1, 1, false, 0.0);
         BotProfile windAware = profile(Difficulty.MEDIUM, 1, 1, true, 0.0);
@@ -101,7 +106,7 @@ class BotAimPlannerTest {
 
         double blindTotal = 0;
         double awareTotal = 0;
-        int trials = 15;
+        int trials = 30;
         for (int i = 0; i < trials; i++) {
             BotAimPlanner.Plan blindPlan = BotAimPlanner.plan(terrain, self, List.of(target), realWind, fullLoadout(), windBlind, rng);
             blindTotal += impactDistance(terrain, self, target, realWind, blindPlan);
@@ -130,6 +135,48 @@ class BotAimPlannerTest {
             BotAimPlanner.Plan plan = BotAimPlanner.plan(terrain, self, List.of(target), 0, loadout, hard, rng);
             assertEquals("basic_shell", plan.weaponId());
         }
+    }
+
+    @Test
+    void neverPicksAShotThatRequiresWrappingTheMap() {
+        // The map is only terrain.width() wide, so any target is reachable
+        // without ever wrapping -- confirmed via an actual physics audit
+        // (2026-08-25) that the old unconstrained grid search kept finding
+        // "technically hits" solutions that wrapped 1-4 times, reading as
+        // "the bot's shell has insane power" to a live player. Zero noise/
+        // wild-miss here so this pins the search's own chosen candidate,
+        // not noise pushing it around.
+        Terrain terrain = flatTerrain(500);
+        BotProfile precise = profile(Difficulty.HARD, 0, 0, true, 0.0);
+        Random rng = new Random(1);
+
+        double[][] positions = {
+                {200, 500, 900, 500},   // typical mid-map spacing
+                {50, 500, 1550, 500},   // near-opposite edges -- the case most tempted to "wrap the short way"
+                {700, 500, 900, 500},   // close together
+                {1500, 500, 100, 500}
+        };
+        for (double[] pos : positions) {
+            Match.TankSnapshot self = new Match.TankSnapshot("bot", pos[0], pos[1], 100, true, null);
+            Match.TankSnapshot target = new Match.TankSnapshot("human", pos[2], pos[3], 100, true, null);
+            for (int i = 0; i < 5; i++) {
+                BotAimPlanner.Plan plan = BotAimPlanner.plan(terrain, self, List.of(target), 0, fullLoadout(), precise, rng);
+                double range = estimateVacuumRange(plan.angleDeg(), plan.power(), plan.weaponId());
+                assertTrue(Math.abs(range) <= terrain.width(),
+                        "plan implied a wrap: pos=" + java.util.Arrays.toString(pos) + " angle=" + plan.angleDeg()
+                                + " power=" + plan.power() + " estRange=" + range);
+            }
+        }
+    }
+
+    private static double estimateVacuumRange(double angleDeg, double power, String weaponId) {
+        com.brutaltank.domain.weapon.WeaponDef weapon = com.brutaltank.domain.weapon.WeaponDef.byId(weaponId);
+        double angleRad = Math.toRadians(angleDeg);
+        double v = power * com.brutaltank.domain.weapon.ProjectileSim.POWER_SCALE * weapon.powerScaleMultiplier();
+        double vx = v * Math.cos(angleRad);
+        double vy0 = v * Math.sin(angleRad);
+        double g = com.brutaltank.domain.weapon.ProjectileSim.GRAVITY * weapon.gravityMultiplier();
+        return vx * (2 * vy0 / g);
     }
 
     @Test

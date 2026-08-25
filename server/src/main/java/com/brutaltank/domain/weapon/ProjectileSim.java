@@ -41,7 +41,11 @@ import java.util.List;
 public final class ProjectileSim {
 
     public static final double GRAVITY = 220.0; // units/s^2
-    public static final double WIND_ACCEL_PER_STRENGTH = 4.0;
+    // 4.0 -> 2.5 (per live-playtest feedback, 2026-08-25: "the scale you use
+    // for wind is a little high, so at 10 the effects seem very strong" —
+    // confirmed linear, no curve, so this is a direct knob). Combined with
+    // the MAX_WIND_VX_CONTRIBUTION cut below.
+    public static final double WIND_ACCEL_PER_STRENGTH = 2.5;
     // Wind was applied as a constant per-step accel with no cap on how long
     // it accumulates (vx += windAccel*DT every step for the shot's whole
     // flight). A normal high-arc shot flies ~1-8s, so wind's contribution
@@ -53,19 +57,30 @@ public final class ProjectileSim {
     // than the shot's own launch velocity ("wind 5 having an unusual
     // effect... bouncing occasionally seem to go super fast" — user report,
     // 2026-08-24). This caps wind's *cumulative* contribution to vx
-    // independent of flight duration instead: 300 sits just above what a
-    // normal max-power 45deg shot accumulates at max wind today (~308 over
-    // its ~7.7s vacuum flight time), so ordinary shots are visually
-    // unchanged and only pathologically long flights (bounces, shallow
-    // skims) stop compounding past this point.
-    public static final double MAX_WIND_VX_CONTRIBUTION = 300.0;
+    // independent of flight duration instead: was 300 (tuned to sit just
+    // above what a normal max-power 45deg shot accumulated at the old
+    // POWER_SCALE=12). Scaled down to 225 in proportion to the POWER_SCALE
+    // cut below (12->9, a 25% reduction) so wind's cap-relative-to-shot-
+    // velocity relationship stays consistent rather than wind becoming
+    // relatively *more* dominant now that shots themselves are weaker.
+    public static final double MAX_WIND_VX_CONTRIBUTION = 225.0;
     public static final double DT = 1.0 / 60.0;
-    // 12.0 doubles the old 6.0 (per user feedback: today's max power should
-    // become the new 50% mark) — max-power/45deg vacuum range is now ~6544
-    // units, well past the ~1300-unit worst-case spawn separation and the
-    // 1600-unit map width, so shots can wrap the screen more than once at
-    // full power. Was 4.0 (~727 range) in M1/M2, then 6.0 (~1636 range).
-    public static final double POWER_SCALE = 12.0;
+    // 12.0 -> 9.0 (per live-playtest feedback, 2026-08-25: bots' full grid
+    // search kept finding "technically hits" solutions that wrapped the
+    // 1600-unit map 1-4 times -- "how can they have so much power... do we
+    // have a really crazy curve" -- confirmed via an actual physics audit
+    // that range scales ~power^2 and most weapons already wrapped at
+    // power>=75/45deg). Bots are now separately constrained to never pick a
+    // wrapping solution (BotAimPlanner.estimateVacuumRange); this is the
+    // human-facing half of the fix -- explicitly a smaller cut than what
+    // fully constraining bots represents, per the user's own framing
+    // ("turn it down by half... we will test it and see if it feels
+    // right"). Was 4.0 (~727 range) in M1/M2, then 6.0 (~1636), then 12.0
+    // (~6544, doubled again). Max-power/45deg vacuum range is now ~3681
+    // units -- still well past the ~1300-unit worst-case spawn separation,
+    // still comfortably covers the 1600-unit map, no longer routinely
+    // wraps it.
+    public static final double POWER_SCALE = 9.0;
     public static final double TANK_HITBOX_RADIUS = 14.0;
     public static final int RESAMPLE_POINTS = 36;
 
