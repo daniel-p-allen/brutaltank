@@ -6,16 +6,16 @@
   on branches/PRs too. The `VITE_SERVER_URL` env var (set in the Vercel
   project's Environments -> Production page) points the built client at
   the game server's WebSocket endpoint. **Must be `wss://`, not `ws://`**
-  (see below) — currently `wss://brutaltank.aktiva.com.au/ws`. If unset,
+  (see below) — currently `wss://<deployed-domain>/ws` (see a teammate
+  for the live value; kept out of this public doc). If unset,
   it falls back to `ws://localhost:6154/ws` for local dev.
 - **TLS/domain — required, not optional.** Vercel always serves the
   client over HTTPS, and browsers block a plain `ws://` connection from
   an HTTPS page ("mixed content") — the client silently sits on
   "Connecting..." forever if the server URL is `ws://`. Current setup:
-  domain `brutaltank.aktiva.com.au` (Let's Encrypt cert) with **nginx
-  running on a separate machine** (not the VM itself, hostname
-  `<redacted-hostname>` per setup notes) reverse-proxying
-  `wss://brutaltank.aktiva.com.au/ws` -> the VM's internal IP on
+  a domain with a Let's Encrypt cert, with **nginx running on a separate
+  machine** (not the VM itself) reverse-proxying
+  `wss://<deployed-domain>/ws` -> the VM's internal IP on
   `:6154`. Nginx's WebSocket proxying needs `proxy_http_version 1.1` +
   `Upgrade`/`Connection` headers (or the equivalent "Websockets Support"
   toggle if using a panel like Nginx Proxy Manager) or the upgrade
@@ -66,7 +66,7 @@ command itself is broken.
 unavailable/being debugged) — run on the VM directly (RDP/console, or
 an interactive SSH session kept open):
 ```
-cd C:\Users\<redacted-user>\brutaltank\server
+cd <path-to-repo-clone-on-VM>\server
 .\gradlew.bat run
 ```
 This runs in the foreground of that terminal and stays up as long as
@@ -98,7 +98,7 @@ another window.
    A **non-admin** local account is simpler if available — a plain
    account's `authorized_keys` file lives at the normal
    `~/.ssh/authorized_keys`. **If the deploy user is an Administrator**
-   (our actual case — `<redacted-user>` is admin), Windows' `sshd` ignores that
+   (our actual case), Windows' `sshd` ignores that
    per-user file entirely and requires the key appended to
    `C:\ProgramData\ssh\administrators_authorized_keys` instead, with a
    locked-down ACL (only `Administrators` + `SYSTEM`):
