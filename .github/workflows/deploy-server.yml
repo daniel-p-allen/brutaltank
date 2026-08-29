@@ -1,11 +1,16 @@
 name: Deploy server
 
+# Disabled 2026-08-29: the deploy VM is being retired in favor of a dedicated
+# one (see CLAUDE.md / PLAN.md). Re-enable by restoring the `push` trigger
+# below once the new VM's secrets (VM_HOST/VM_USER/VM_SSH_KEY/VM_DEPLOY_PATH)
+# are set up.
 on:
-  push:
-    branches: [master]
-    paths:
-      - "server/**"
-      - ".github/workflows/deploy-server.yml"
+  workflow_dispatch: {}
+  # push:
+  #   branches: [master]
+  #   paths:
+  #     - "server/**"
+  #     - ".github/workflows/deploy-server.yml"
 
 jobs:
   deploy:
