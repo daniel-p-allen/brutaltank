@@ -87,6 +87,14 @@
 </script>
 
 <main>
+	<!-- TEMPORARY (2026-08-29): the game server's hosting VM is being retired
+	     in favor of a dedicated one; this client can't reach a game server
+	     until that's done. Remove once the new server is live -- see
+	     README.md / CLAUDE.md for status. -->
+	<div class="maintenance-banner">
+		Live server is temporarily down while we move to new hosting. Please
+		check back soon.
+	</div>
 	<div class="game-frame" style="border-color: {localPlayerColor ?? '#444'}">
 		<h1 style={localPlayerColor ? `color: ${localPlayerColor}` : ''}>{headingText}</h1>
 		<div class="status-row">
@@ -164,5 +172,17 @@
 	.restart-session:hover {
 		color: #ccc;
 		border-color: #777;
+	}
+
+	.maintenance-banner {
+		max-width: 64rem;
+		margin: 0 auto 1rem auto;
+		padding: 0.6rem 1rem;
+		border: 1px solid #7a5a00;
+		border-radius: 8px;
+		background: #3a2c00;
+		color: #ffcc66;
+		font-size: 0.9rem;
+		text-align: center;
 	}
 </style>
